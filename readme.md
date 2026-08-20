@@ -1,1 +1,1 @@
-prend un ficherSQL de type DDL et le convertit en .drawio ou .graphml
+prend un ficherSQL de type DDL et le convertit en graphes pour Drawio et Yed.
