@@ -1,16 +1,18 @@
 """
-Générateur de MPD (.drawio ou .graphml) à partir d'un fichier .sql de type DDL (CREATE TABLE).
+Génère un Modèle Physique de Données (MPD) à partir d'un fichier .sql fourni en entrée
 
-Pipeline :
+Enchaînement des conversions :
     .sql
-            --simple_sql_parser-->  dict bruts
-            --pydantic-->           modèle pivot
-            --drawpyo-->            .drawio
+            --simple_sql_parser-->  dictionnaires bruts (de type dict)
+            --pydantic-->           modèle intermédiaire (de type DataModel)
+            --drawpyo-->            .drawio (format XML)
+            ou
+            ----graphml-->          .graphml (format XML)
 
 Installation :
     pip install simple-ddl-parser drawpyo pydantic
 
-Usage :
+Utilisation en ligne de commande dans la console :
     python main.py --input ./input/mysql.sql --dialect mysql --output ./output/MySQL.drawio
 """
 
@@ -27,7 +29,7 @@ import drawpyo
 
 
 # --------------------------------------------------------------------------- #
-# 1. MODELE PIVOT (pydantic)
+# 1. MODELE INTERMÉDIAIRE (pydantic)
 #
 # On définit des classes héritant de BaseModel (défini par de pydantic)
 # ce qui permet :
@@ -36,28 +38,6 @@ import drawpyo
 # ◦ comparaison / création propre d’objets
 # auxquelles on rajoute des spécificités.
 # --------------------------------------------------------------------------- #
-
-
-class Table(BaseModel):
-    # Exemple :
-    #     t = Table(
-    #     name="users",
-    #     columns=[
-    #         Column(name="id", type="INT", is_pk=True),
-    #         Column(name="email", type="VARCHAR(255)", nullable=False),
-    #     ]
-    # )
-    name: str
-    schema_name: Optional[str] = None
-    columns: list[Column] = Field(default_factory=list)
-
-
-class Column(BaseModel):
-    name: str
-    type: str
-    nullable: bool = True
-    is_pk: bool = False
-    fk: Optional[ForeignKey] = None
 
 
 class ForeignKey(BaseModel):
@@ -73,8 +53,30 @@ class Relation(BaseModel):
     to_column: str
 
 
+class Column(BaseModel):
+    name: str
+    type: str
+    nullable: bool = True
+    is_pk: bool = False
+    fk: Optional[ForeignKey] = None
+
+
+class Table(BaseModel):
+    # Exemple :
+    #     t = Table(
+    #     name="users",
+    #     columns=[
+    #         Column(name="id", type="INT", is_pk=True),
+    #         Column(name="email", type="VARCHAR(255)", nullable=False),
+    #     ]
+    # )
+    name:        str
+    schema_name: Optional[str] = None
+    columns:     list[Column]  = Field(default_factory=list)
+
+
 class DataModel(BaseModel):
-    tables: list[Table] = Field(default_factory=list)
+    tables:    list[Table]    = Field(default_factory=list)
     relations: list[Relation] = Field(default_factory=list)
 
     def get_table(self, name: str) -> Optional[Table]:
@@ -224,32 +226,78 @@ def build_graphml(model: DataModel, output_path: Path) -> None:
     graph = ET.SubElement(root, "{http://graphml.graphdrawing.org/xmlns}graph", {"edgedefault": "directed"})
 
     cols_per_row = max(1, math.ceil(math.sqrt(len(model.tables))))
+
+    # Parcours des tables
     for i, table in enumerate(model.tables):
         grid_col = i % cols_per_row
         grid_row = i // cols_per_row
         x = grid_col * GRID_SPACING_X
         y = grid_row * GRID_SPACING_Y
 
-        node_id = node_id(table.name)
-        node = ET.SubElement(graph, "{http://graphml.graphdrawing.org/xmlns}node", {"id": node_id})
+        nid = node_id(table.name)
+        node = ET.SubElement(graph, "{http://graphml.graphdrawing.org/xmlns}node", {"id": nid})
         data = ET.SubElement(node, "{http://graphml.graphdrawing.org/xmlns}data", {"key": "d0"})
-        shape = ET.SubElement(data, "{http://www.yworks.com/xml/graphml}ShapeNode")
+        shape = ET.SubElement(data, "{http://www.yworks.com/xml/graphml}GenericNode", {"configuration": "com.yworks.entityRelationship.big_entity"})
         ET.SubElement(shape, "{http://www.yworks.com/xml/graphml}Geometry",
                       {"x": str(x), "y": str(y), "width": str(TABLE_WIDTH), "height": str(HEADER_HEIGHT + ROW_HEIGHT * max(1, len(table.columns)))})
-        ET.SubElement(shape, "{http://www.yworks.com/xml/graphml}Fill",
-                      {"color": "#dae8fc", "transparent": "false"})
-        ET.SubElement(shape, "{http://www.yworks.com/xml/graphml}BorderStyle",
-                      {"color": "#6c8ebf", "type": "line", "width": "1.0"})
-        label = ET.SubElement(shape, "{http://www.yworks.com/xml/graphml}NodeLabel",
-                              {
-                                  "alignment": "left",
-                                  "autoSizePolicy": "content",
-                                  "fontFamily": "Dialog",
-                                  "fontSize": "12",
-                                  "fontStyle": "bold",
-                                  "underlined": "false",
-                              })
-        label.text = table_label(table)
+        # ET.SubElement(shape, "{http://www.yworks.com/xml/graphml}Fill",
+        #               {"color": "#dae8fc", "transparent": "false"})
+        # ET.SubElement(shape, "{http://www.yworks.com/xml/graphml}BorderStyle",
+        #               {"color": "#6c8ebf", "type": "line", "width": "1.0"})
+        header_label = ET.SubElement(shape, "{http://www.yworks.com/xml/graphml}NodeLabel",
+                                     {
+                                         "alignment": "center",
+                                         "autoSizePolicy": "content",
+                                         "backgroundColor": "#FFFFE1",
+                                         "configuration": "com.yworks.entityRelationship.label.name",
+                                         "fontFamily": "Courier",
+                                         "fontSize": "12",
+                                         "fontStyle": "plain",
+                                         "hasLineColor": "false",
+                                         "horizontalTextPosition": "center",
+                                         "iconTextGap": "4",
+                                         "modelName": "internal",
+                                         "modelPosition": "t",
+                                         "textColor": "#000000",
+                                         "verticalTextPosition": "bottom",
+                                         "visible": "true",
+                                         "xml:space": "preserve",
+                                     })
+        header_label.text = table.name.upper()
+
+        # Parcours des colonnes de la table
+        field_lines = []
+        for col in table.columns:
+            tags = []
+            if col.is_pk:
+                tags.append("PK")
+            if col.fk:
+                tags.append("FK")
+            prefix = ", ".join(tags) if tags else ""
+            if prefix:
+                prefix = f"{prefix:<5} "
+            field_lines.append(f"{prefix}{col.name} : {col.type}")
+
+        fields_label = ET.SubElement(shape, "{http://www.yworks.com/xml/graphml}NodeLabel",
+                                     {
+                                         "alignment": "left",
+                                         "autoSizePolicy": "content",
+                                         "backgroundColor": "#FFFFFF",
+                                         "configuration": "com.yworks.entityRelationship.label.attributes",
+                                         "fontFamily": "Courier",
+                                         "fontSize": "12",
+                                         "underlined": "false",
+                                         "fontStyle": "plain",
+                                         "hasLineColor": "false",
+                                         "horizontalTextPosition": "center",
+                                         "iconTextGap": "4",
+                                         "modelName": "custom",
+                                         "textColor": "#000000",
+                                         "verticalTextPosition": "bottom",
+                                         "visible": "true",
+                                         "xml:space": "preserve",
+                                     })
+        fields_label.text = "\n".join(field_lines)
 
     for rel in model.relations:
         source_id = node_id(rel.from_table)
@@ -299,10 +347,10 @@ def build_drawio(model: DataModel, output_path: Path) -> None:
         )
         header.width = TABLE_WIDTH
         header.height = HEADER_HEIGHT + ROW_HEIGHT * max(1, len(table.columns))
-        header.apply_style_string(
-            "swimlane;fontStyle=1;align=center;verticalAlign=top;"
-            "fillColor=#dae8fc;strokeColor=#6c8ebf;startSize=30;"
-        )
+        # header.apply_style_string(
+        #     "swimlane;fontStyle=1;align=center;verticalAlign=top;"
+        #     "fillColor=#dae8fc;strokeColor=#6c8ebf;startSize=30;"
+        # )
         table_objects[table.name] = header
 
         for j, col in enumerate(table.columns):
@@ -314,12 +362,12 @@ def build_drawio(model: DataModel, output_path: Path) -> None:
             )
             row.width = TABLE_WIDTH
             row.height = ROW_HEIGHT
-            row.apply_style_string(
-                "text;html=1;align=left;verticalAlign=middle;spacingLeft=8;"
-                "fontSize=11;strokeColor=#6c8ebf;strokeWidth=1;"
-                "shape=partialRectangle;top=0;left=0;right=0;bottom=1;"
-                "fillColor=none;"
-            )
+            # row.apply_style_string(
+            #     "text;html=1;align=left;verticalAlign=middle;spacingLeft=8;"
+            #     "fontSize=11;strokeColor=#6c8ebf;strokeWidth=1;"
+            #     "shape=partialRectangle;top=0;left=0;right=0;bottom=1;"
+            #     "fillColor=none;"
+            # )
             row_objects[(table.name, col.name)] = row
 
     # Arêtes de type "pied de poule" pour les FK : 1 (table référencée) -- N (table porteuse de la FK)
@@ -363,12 +411,11 @@ def main() -> None:
 
     # fabrication des chemins à partir des arguments fournis en ligne de commande
     ddl_path = Path(args.input)
-    if args.output is None:
-        ext = "drawio" if args.format == "drawio" else "graphml"
-        output_path = Path(f"./output/MySQL.{ext}")
-    else:
-        output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    stem = ddl_path.stem if ddl_path.stem else "MySQL"
+    output_dir = Path("./output")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    drawio_path  = output_dir / f"{stem}.drawio"
+    graphml_path = output_dir / f"{stem}.graphml"
 
     # lecture du fichier sql en entrée
     ddl_text = ddl_path.read_text(encoding="utf-8")
@@ -383,15 +430,11 @@ def main() -> None:
         print(f"  - {t.name} : {len(t.columns)} colonne(s), PK={pk}, FK={fk}")
     print(f"{len(model.relations)} relation(s) FK détectée(s).")
 
-    if args.format in {"drawio", "both"}:
-        drawio_path = output_path if output_path.suffix.lower() == ".drawio" else output_path.with_suffix(".drawio")
-        build_drawio(model, drawio_path)
-        print(f"Fichier drawio généré : {drawio_path}")
+    build_drawio(model, drawio_path)
+    print(f"Fichier drawio généré : {drawio_path}")
 
-    if args.format in {"graphml", "both"}:
-        graphml_path = output_path if output_path.suffix.lower() == ".graphml" else output_path.with_suffix(".graphml")
-        build_graphml(model, graphml_path)
-        print(f"Fichier graphml généré : {graphml_path}")
+    build_graphml(model, graphml_path)
+    print(f"Fichier graphml généré : {graphml_path}")
 
 
 if __name__ == "__main__":
