@@ -1,52 +1,32 @@
 """
-Génère un Modèle Physique de Données (MPD) à partir d'un fichier .sql fourni en entrée
+Convertir un .sql en Modèle Physique de Données (MPD)
 
 Enchaînement des conversions :
-    .sql
-            --simple_sql_parser-->  dictionnaires bruts (de type dict)
-            --pydantic-->           modèle intermédiaire (de type DataModel)
-            --drawpyo-->            .drawio (format XML)
-            ou
-            ----graphml-->          .graphml (format XML)
-
-Installation :
-    pip install simple-ddl-parser drawpyo pydantic
-
-Utilisation en ligne de commande dans la console :
-    python main.py --input ./input/mysql.sql --dialect mysql --output ./output/MySQL.drawio
+    SQL   --simple_sql_parser  -->  DataModel (classe basée sur pydantic)
+                                    --build_drawpio  -->   .drawio
+                                    ----build_graphml-->   .graphml
 """
 
-from __future__ import annotations
-
-import argparse
 import math
 from pathlib import Path
 from typing import Optional
-
 from pydantic import BaseModel, Field
 from simple_ddl_parser import DDLParser
 import drawpyo
 
 
-# --------------------------------------------------------------------------- #
-# 1. MODELE INTERMÉDIAIRE (pydantic)
-#
-# On définit des classes héritant de BaseModel (défini par de pydantic)
-# ce qui permet :
-# ◦ validation des types
-# ◦ conversion de données
-# ◦ comparaison / création propre d’objets
-# auxquelles on rajoute des spécificités.
-# --------------------------------------------------------------------------- #
-
+"""
+    Définition de Classes en utilisant pydantic
+"""
 
 class ForeignKey(BaseModel):
+    """ clé étrangère """
     ref_table: str
     ref_column: str
 
 
 class Relation(BaseModel):
-    """FK matérialisée séparément, pratique pour tracer les arêtes."""
+    """ relation crée par une clé étrangère (classe séparée pratique pour tracer les arêtes)"""
     from_table: str
     from_column: str
     to_table: str
@@ -54,6 +34,7 @@ class Relation(BaseModel):
 
 
 class Column(BaseModel):
+    """ Colonne """
     name: str
     type: str
     nullable: bool = True
@@ -62,6 +43,7 @@ class Column(BaseModel):
 
 
 class Table(BaseModel):
+    """ Tabel """
     # Exemple :
     #     t = Table(
     #     name="users",
@@ -76,21 +58,24 @@ class Table(BaseModel):
 
 
 class DataModel(BaseModel):
+    """ BDD entière """
     tables:    list[Table]    = Field(default_factory=list)
     relations: list[Relation] = Field(default_factory=list)
 
+    # parcours des tables pour retrouver une table par son nom
     def get_table(self, name: str) -> Optional[Table]:
         return next((t for t in self.tables if t.name == name), None)
 
 
-# --------------------------------------------------------------------------- #
-# 2. PARSING SQL -> MODELE PIVOT
-# --------------------------------------------------------------------------- #
+"""
+    Conversion SQL -> Modèle pivot
+"""
 
+# parcours des métadonnées de type pour convertir un dictionnaire SQL en chaîne lisible
 def column_type_to_str(col: dict) -> str:
-    """Reconstitue un type lisible, ex: VARCHAR(255)."""
+    """ Conversion dict -> str, exemple: VARCHAR(255)."""
     type_str = col.get("type") or ""
-    size = col.get("size")
+    size     = col.get("size")
     if size:
         if isinstance(size, (tuple, list)):
             type_str += f"({','.join(str(s) for s in size)})"
@@ -99,7 +84,8 @@ def column_type_to_str(col: dict) -> str:
     return type_str
 
 
-def parse_ddl_to_model(ddl_text: str, dialect: str) -> DataModel:
+# parcours des instructions DDL pour reconstruire le modèle de données complet
+def parse_ddl_to_model(ddl_text: str) -> DataModel:
     """
     dialect : conservé pour tracer l'origine du fichier / pouvoir router vers
     un autre parseur (ex: sqlglot) en cas d'échec. simple-ddl-parser n'exige
@@ -110,6 +96,7 @@ def parse_ddl_to_model(ddl_text: str, dialect: str) -> DataModel:
 
     model = DataModel()
 
+    # parcours des tables du DDL pour les transformer en objets Table et Column
     for raw_table in parsed:
         if "columns" not in raw_table:
             # Ce n'est pas un CREATE TABLE (index, alter isolé, etc.) -> on ignore ici
@@ -150,6 +137,7 @@ def parse_ddl_to_model(ddl_text: str, dialect: str) -> DataModel:
 
     # Gère les FK déclarées via ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY,
     # que simple-ddl-parser restitue comme statements 'alter' séparés.
+    # parcours des instructions ALTER pour détecter les contraintes FK supplémentaires
     for raw_stmt in parsed:
         for alter in raw_stmt.get("alter", {}).get("columns", []) if isinstance(raw_stmt.get("alter"), dict) else []:
             pass  # structure variable selon version -> à adapter si vos DDL utilisent ce style
@@ -168,6 +156,7 @@ GRID_SPACING_X = 300
 GRID_SPACING_Y = 260
 
 
+# parcours des colonnes pour produire l'étiquette lisible de chaque champ
 def column_label(col: Column) -> str:
     prefix = ""
     if col.is_pk:
@@ -178,12 +167,15 @@ def column_label(col: Column) -> str:
     return f"{prefix}{col.name} : {col.type}{nul}"
 
 
+# parcours des caractères du nom de table pour générer un identifiant XML sûr
 def node_id(table_name: str) -> str:
     return "n_" + ''.join(ch if ch.isalnum() else '_' for ch in table_name).strip('_')
 
 
+# parcours des colonnes pour construire le libellé complet d'une table en texte multi-ligne
 def table_label(table: Table) -> str:
     lines = [table.name.upper()]
+    # parcours des colonnes pour ajouter les tags PK/FK et le type
     for col in table.columns:
         tags = []
         if col.is_pk:
@@ -197,6 +189,7 @@ def table_label(table: Table) -> str:
     return "\n".join(lines)
 
 
+# parcours des tables pour écrire le fichier GraphML de sortie
 def build_graphml(model: DataModel, output_path: Path) -> None:
     """Génère un fichier GraphML exploitable par yEd."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -317,6 +310,7 @@ def build_graphml(model: DataModel, output_path: Path) -> None:
     tree.write(output_path, encoding="utf-8", xml_declaration=True)
 
 
+# parcours du modèle pour générer le diagramme Draw.io final
 def build_drawio(model: DataModel, output_path: Path) -> None:
     file = drawpyo.File()
     file.file_path = str(output_path.parent)
@@ -334,25 +328,27 @@ def build_drawio(model: DataModel, output_path: Path) -> None:
     n_tables = len(model.tables)
     cols_per_row = max(1, math.ceil(math.sqrt(n_tables)))
 
+    # parcours des tables pour les placer dans la grille drawio
     for i, table in enumerate(model.tables):
         grid_col = i % cols_per_row
         grid_row = i // cols_per_row
         x = grid_col * GRID_SPACING_X
         y = grid_row * GRID_SPACING_Y
 
+        # création du conteneur de table (nom de la table)
         header = drawpyo.diagram.Object(
             page=page,
             value=table.name.upper(),
-            position=(x, y),
+            position=(x, y)
         )
         header.width = TABLE_WIDTH
         header.height = HEADER_HEIGHT + ROW_HEIGHT * max(1, len(table.columns))
-        # header.apply_style_string(
-        #     "swimlane;fontStyle=1;align=center;verticalAlign=top;"
-        #     "fillColor=#dae8fc;strokeColor=#6c8ebf;startSize=30;"
-        # )
+        header.apply_style_string(
+            "whiteSpace=wrap;rounded=0;dashed=0;align=center;verticalAlign=top;"
+        )
         table_objects[table.name] = header
 
+        # parcours des colonnes pour créer les lignes de champs de la table
         for j, col in enumerate(table.columns):
             row = drawpyo.diagram.Object(
                 page=page,
@@ -362,15 +358,12 @@ def build_drawio(model: DataModel, output_path: Path) -> None:
             )
             row.width = TABLE_WIDTH
             row.height = ROW_HEIGHT
-            # row.apply_style_string(
-            #     "text;html=1;align=left;verticalAlign=middle;spacingLeft=8;"
-            #     "fontSize=11;strokeColor=#6c8ebf;strokeWidth=1;"
-            #     "shape=partialRectangle;top=0;left=0;right=0;bottom=1;"
-            #     "fillColor=none;"
-            # )
+            row.apply_style_string(
+                "whiteSpace=wrap;rounded=0;dashed=0;align=left;verticalAlign=middle;spacingLeft=8;"
+            )
             row_objects[(table.name, col.name)] = row
 
-    # Arêtes de type "pied de poule" pour les FK : 1 (table référencée) -- N (table porteuse de la FK)
+    # parcours des relations pour tracer les arêtes FK entre tables
     for rel in model.relations:
         source = row_objects.get((rel.from_table, rel.from_column))
         target = row_objects.get((rel.to_table, rel.to_column))
@@ -386,42 +379,46 @@ def build_drawio(model: DataModel, output_path: Path) -> None:
         edge.endFill_source  = False
 
     file.write()
-    # Force grid attribute to 0 in the generated .drawio XML (mxGraphModel grid)
+    # parcours du fichier XML généré pour forcer la grille et la page en mode masqué
     generated_file = Path(file.file_path) / file.file_name
     if generated_file.exists():
         content = generated_file.read_text(encoding="utf-8")
         if 'grid="1"' in content:
             content = content.replace('grid="1"', 'grid="0"')
-            generated_file.write_text(content, encoding="utf-8")
+        if 'page="1"' in content:
+            content = content.replace('page="1"', 'page="0"')
+        generated_file.write_text(content, encoding="utf-8")
 
 
 # --------------------------------------------------------------------------- #
 # 4. CLI
 # --------------------------------------------------------------------------- #
 
+# parcours du fichier SQL d'entrée pour générer le diagramme et le graphml
 def main() -> None:
     # gestion des arguments de la ligne de commande
-    parser = argparse.ArgumentParser(description="Génère un MPD .drawio ou .graphml depuis un DDL SQL")
-    parser.add_argument("--input", default="./input/MySQL.sql", help="Chemin du fichier DDL")
-    parser.add_argument("--dialect", default="mysql", help="Dialecte SQL (informatif)")
-    parser.add_argument("--format", choices=["drawio", "graphml", "both"], default="drawio",
-                        help="Format de sortie : drawio, graphml ou both")
-    parser.add_argument("--output", default=None, help="Fichier de sortie; si omis, le nom est généré selon le format")
-    args = parser.parse_args()
+    # parser = argparse.ArgumentParser(description="Génère un MPD .drawio ou .graphml depuis un DDL SQL")
+    # parser.add_argument("--input", default="./input/MySQL.sql", help="Chemin du fichier DDL")
+    # parser.add_argument("--dialect", default="mysql", help="Dialecte SQL (informatif)")
+    # parser.add_argument("--format", choices=["drawio", "graphml", "both"], default="drawio",
+    #                     help="Format de sortie : drawio, graphml ou both")
+    # parser.add_argument("--output", default=None, help="Fichier de sortie; si omis, le nom est généré selon le format")
+    # args = parser.parse_args()
 
     # fabrication des chemins à partir des arguments fournis en ligne de commande
-    ddl_path = Path(args.input)
-    stem = ddl_path.stem if ddl_path.stem else "MySQL"
+
+    input_path = Path("./input") / "MySQL.sql"
+    # stem = ddl_path.stem if ddl_path.stem else "MySQL"
     output_dir = Path("./output")
     output_dir.mkdir(parents=True, exist_ok=True)
-    drawio_path  = output_dir / f"{stem}.drawio"
-    graphml_path = output_dir / f"{stem}.graphml"
+    drawio_path  = output_dir / "MySQL.drawio"
+    graphml_path = output_dir / "MySQL.graphml"
 
     # lecture du fichier sql en entrée
-    ddl_text = ddl_path.read_text(encoding="utf-8")
+    ddl_text = input_path.read_text(encoding="utf-8")
 
     # fabrication du DataModel à partir du contenu du fichier sql en entrée
-    model = parse_ddl_to_model(ddl_text, dialect=args.dialect)
+    model = parse_ddl_to_model(ddl_text)
 
     print(f"{len(model.tables)} table(s) détectée(s) :")
     for t in model.tables:

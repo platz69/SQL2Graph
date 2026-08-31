@@ -1,4 +1,4 @@
-Je te conseille de faire un outil volontairement simple : il lit un fichier SQL, extrait les tables, colonnes, types, clés primaires et clés étrangères, puis génère un diagramme éditable. Tu n’as pas besoin de modéliser les index, contraintes `UNIQUE`, valeurs par défaut, vues ou procédures.
+Fait un outil volontairement simple : il lit un fichier SQL, extrait les tables, colonnes, types, clés primaires et clés étrangères, puis génère un diagramme éditable. Tu n’as pas besoin de modéliser les index, contraintes `UNIQUE`, valeurs par défaut, vues ou procédures.
 
 ## Périmètre fonctionnel
 
