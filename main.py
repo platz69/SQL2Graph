@@ -1,21 +1,28 @@
 """
-Convertir un .sql en Modèle Physique de Données (MPD)
+Convertit un .sql en Modèle Physique de Données (MPD)
 
 Enchaînement des conversions :
     SQL   --simple_sql_parser  -->  DataModel (classe basée sur pydantic)
                                     --build_drawpio  -->   .drawio
-                                    ----build_graphml-->   .graphml
+                                    ----construction_graphml-->   .graphml
 """
 
+# bibliothèques standard (stdlib)
 import math
 from pathlib import Path
-from typing import Optional
+
+# bibliothèques externes (3rd party)
 from pydantic import BaseModel, Field
 from simple_ddl_parser import DDLParser
 import drawpyo
 
 """
     Définition de Classes en utilisant pydantic
+    Syntaxe :
+    • "= True" pour dclarer la valeur par défaut
+    • "CleEtrangere | None = None" se lit "(CleEtrangere | None) = None", c-à-d :
+        • None est un type explicitement accepté  
+        • la valeur par défaut est None
 """
 
 class CleEtrangere(BaseModel):
@@ -25,7 +32,8 @@ class CleEtrangere(BaseModel):
 
 
 class Relation(BaseModel):
-    """ relation crée par une clé étrangère (classe séparée pratique pour tracer les arêtes)"""
+    """ relation crée par une clé étrangère
+       (classe séparée pratique pour tracer les arêtes sans parcourir toutes les tables)"""
     from_table: str
     from_column: str
     to_table: str
@@ -36,9 +44,9 @@ class Colonne(BaseModel):
     """ Colonne """
     name: str
     type: str
-    nullable: bool = True
+    nullable: bool = True # = True fixe la valeur par défaut
     is_pk: bool = False
-    fk: Optional[CleEtrangere] = None
+    fk: CleEtrangere | None = None
 
 
 class Table(BaseModel):
@@ -52,7 +60,7 @@ class Table(BaseModel):
     #     ]
     # )
     name:        str
-    schema_name: Optional[str] = None
+    schema_name: str | None = None
     columns:     list[Colonne]  = Field(default_factory=list)
 
 
@@ -62,7 +70,7 @@ class ModelePydantic(BaseModel):
     relations: list[Relation] = Field(default_factory=list)
 
     # parcours des tables pour retrouver une table par son nom
-    def get_table(self, name: str) -> Optional[Table]:
+    def get_table(self, name: str) -> Table | None:
         return next((t for t in self.tables if t.name == name), None)
 
 
@@ -71,7 +79,7 @@ class ModelePydantic(BaseModel):
 """
 
 # parcours des métadonnées de type pour convertir un dictionnaire SQL en chaîne lisible
-def column_type_to_str(col: dict) -> str:
+def conversion_colonne_str(col: dict) -> str:
     """ Conversion dict -> str, exemple: VARCHAR(255)."""
     type_str = col.get("type") or ""
     taille     = col.get("size")
@@ -131,7 +139,7 @@ def conversion_ddl_pydantic(ddl_texte: str) -> ModelePydantic:
             table.columns.append(
                 Colonne(
                     name=nom_colonne,
-                    type=column_type_to_str(raw_col),
+                    type=conversion_colonne_str(raw_col),
                     nullable=raw_col.get("nullable", True),
                     is_pk=nom_colonne in pk_colonnes,
                     fk=fk,
@@ -154,15 +162,10 @@ def conversion_ddl_pydantic(ddl_texte: str) -> ModelePydantic:
 # 3. MODELE PIVOT -> DIAGRAMME DRAWIO (drawpyo)
 # --------------------------------------------------------------------------- #
 
-TABLE_WIDTH = 220
-ROW_HEIGHT = 26
-HEADER_HEIGHT = 30
-GRID_SPACING_X = 300
-GRID_SPACING_Y = 260
-
+LARGEUR_TABLE, HAUTEUR_LIGNE, HAUTEUR_TITRE, ESPACEMENT_X, ESPACEMENT_Y = 220, 26, 30, 300, 260
 
 # parcours des colonnes pour produire l'étiquette lisible de chaque champ
-def column_label(col: Colonne) -> str:
+def calcul_label_colonne(col: Colonne) -> str:
     prefix = ""
     # si la colonne est une clé primaire, on ajoute un symbole PK
     if col.is_pk:
@@ -200,7 +203,7 @@ def table_label(table: Table) -> str:
 
 
 # parcours des tables pour écrire le fichier GraphML de sortie
-def build_graphml(model: ModelePydantic, output_path: Path) -> None:
+def construction_graphml(model: ModelePydantic, output_path: Path) -> None:
     """Génère un fichier GraphML exploitable par yEd."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -230,22 +233,22 @@ def build_graphml(model: ModelePydantic, output_path: Path) -> None:
     # création du graphe GraphML principal
     graph = ET.SubElement(root, "{http://graphml.graphdrawing.org/xmlns}graph", {"edgedefault": "directed"})
 
-    # calcul du nombre de colonnes de la grille pour l'organisation visuelle
-    cols_per_row = max(1, math.ceil(math.sqrt(len(model.tables))))
+    # calcul du nombre de tables par ligne dans le graphe
+    nb_tables_par_ligne = max(1, math.ceil(math.sqrt(len(model.tables))))
 
-    # Parcours des tables
+    # positionnement de chaque table
     for i, table in enumerate(model.tables):
-        grid_col = i % cols_per_row
-        grid_row = i // cols_per_row
-        x = grid_col * GRID_SPACING_X
-        y = grid_row * GRID_SPACING_Y
+        grid_col = i % nb_tables_par_ligne
+        grid_row = i // nb_tables_par_ligne
+        x = grid_col * ESPACEMENT_X
+        y = grid_row * ESPACEMENT_Y
 
         nid = node_id(table.name)
         node = ET.SubElement(graph, "{http://graphml.graphdrawing.org/xmlns}node", {"id": nid})
         data = ET.SubElement(node, "{http://graphml.graphdrawing.org/xmlns}data", {"key": "d0"})
         shape = ET.SubElement(data, "{http://www.yworks.com/xml/graphml}GenericNode", {"configuration": "com.yworks.entityRelationship.big_entity"})
         ET.SubElement(shape, "{http://www.yworks.com/xml/graphml}Geometry",
-                      {"x": str(x), "y": str(y), "width": str(TABLE_WIDTH), "height": str(HEADER_HEIGHT + ROW_HEIGHT * max(1, len(table.columns)))})
+                      {"x": str(x), "y": str(y), "width": str(LARGEUR_TABLE), "height": str(HAUTEUR_TITRE + HAUTEUR_LIGNE * max(1, len(table.columns)))})
         # ET.SubElement(shape, "{http://www.yworks.com/xml/graphml}Fill",
         #               {"color": "#dae8fc", "transparent": "false"})
         # ET.SubElement(shape, "{http://www.yworks.com/xml/graphml}BorderStyle",
@@ -329,7 +332,7 @@ def build_graphml(model: ModelePydantic, output_path: Path) -> None:
 
 
 # parcours du modèle pour générer le diagramme Draw.io final
-def build_drawio(model: ModelePydantic, output_path: Path) -> None:
+def construction_drawio(model: ModelePydantic, output_path: Path) -> None:
     file = drawpyo.File()
     file.file_path = str(output_path.parent)
     file.file_name = output_path.name
@@ -350,8 +353,8 @@ def build_drawio(model: ModelePydantic, output_path: Path) -> None:
     for i, table in enumerate(model.tables):
         grid_col = i % cols_per_row
         grid_row = i // cols_per_row
-        x = grid_col * GRID_SPACING_X
-        y = grid_row * GRID_SPACING_Y
+        x = grid_col * ESPACEMENT_X
+        y = grid_row * ESPACEMENT_Y
 
         # création du conteneur de table (nom de la table)
         header = drawpyo.diagram.Object(
@@ -360,8 +363,8 @@ def build_drawio(model: ModelePydantic, output_path: Path) -> None:
             value=table.name.upper(),
             position=(x, y)
         )
-        header.width = TABLE_WIDTH
-        header.height = HEADER_HEIGHT + ROW_HEIGHT * max(1, len(table.columns))
+        header.width = LARGEUR_TABLE
+        header.height = HAUTEUR_TITRE + HAUTEUR_LIGNE * max(1, len(table.columns))
         header.apply_style_string(
             "whiteSpace=wrap;rounded=0;dashed=0;align=center;verticalAlign=top;"
         )
@@ -372,12 +375,12 @@ def build_drawio(model: ModelePydantic, output_path: Path) -> None:
             row = drawpyo.diagram.Object(
                 page=page,
                 id=f"{table.name}.{col.name}",
-                value=column_label(col),
+                value=calcul_label_colonne(col),
                 parent=header,
-                position_rel_to_parent=(0, HEADER_HEIGHT + j * ROW_HEIGHT),
+                position_rel_to_parent=(0, HAUTEUR_TITRE + j * HAUTEUR_LIGNE),
             )
-            row.width = TABLE_WIDTH
-            row.height = ROW_HEIGHT
+            row.width = LARGEUR_TABLE
+            row.height = HAUTEUR_LIGNE
             row.apply_style_string(
                 "whiteSpace=wrap;rounded=0;dashed=0;align=left;verticalAlign=middle;spacingLeft=8;"
             )
@@ -457,11 +460,11 @@ def main() -> None:
     print(f"{len(model.relations)} relations FK détectées.")
 
     # génération du diagramme drawio à partir du modèle
-    build_drawio(model, drawio_path)
+    construction_drawio(model, drawio_path)
     print(f"Fichier drawio généré : {drawio_path}")
 
     # génération du diagramme graphml à partir du même modèle
-    build_graphml(model, graphml_path)
+    construction_graphml(model, graphml_path)
     print(f"Fichier graphml généré : {graphml_path}")
     # print(model.model_dump_json(indent=2))
 
