@@ -14,12 +14,11 @@ from pydantic import BaseModel, Field
 from simple_ddl_parser import DDLParser
 import drawpyo
 
-
 """
     Définition de Classes en utilisant pydantic
 """
 
-class ForeignKey(BaseModel):
+class CleEtrangere(BaseModel):
     """ clé étrangère """
     ref_table: str
     ref_column: str
@@ -33,17 +32,17 @@ class Relation(BaseModel):
     to_column: str
 
 
-class Column(BaseModel):
+class Colonne(BaseModel):
     """ Colonne """
     name: str
     type: str
     nullable: bool = True
     is_pk: bool = False
-    fk: Optional[ForeignKey] = None
+    fk: Optional[CleEtrangere] = None
 
 
 class Table(BaseModel):
-    """ Tabel """
+    """ Table """
     # Exemple :
     #     t = Table(
     #     name="users",
@@ -54,10 +53,10 @@ class Table(BaseModel):
     # )
     name:        str
     schema_name: Optional[str] = None
-    columns:     list[Column]  = Field(default_factory=list)
+    columns:     list[Colonne]  = Field(default_factory=list)
 
 
-class DataModel(BaseModel):
+class ModelePydantic(BaseModel):
     """ BDD entière """
     tables:    list[Table]    = Field(default_factory=list)
     relations: list[Relation] = Field(default_factory=list)
@@ -68,81 +67,87 @@ class DataModel(BaseModel):
 
 
 """
-    Conversion SQL -> Modèle pivot
+    Conversion SQL -> DataModel
 """
 
 # parcours des métadonnées de type pour convertir un dictionnaire SQL en chaîne lisible
 def column_type_to_str(col: dict) -> str:
     """ Conversion dict -> str, exemple: VARCHAR(255)."""
     type_str = col.get("type") or ""
-    size     = col.get("size")
-    if size:
-        if isinstance(size, (tuple, list)):
-            type_str += f"({','.join(str(s) for s in size)})"
+    taille     = col.get("size")
+    # si une taille est définie, on l'ajoute au type SQL
+    if taille:
+        # si la taille est un tuple ou une liste, on la transforme en format (a,b)
+        if isinstance(taille, (tuple, list)):
+            type_str += f"({','.join(str(s) for s in taille)})"
         else:
-            type_str += f"({size})"
+            # si la taille est un scalaire, on la met en notation standard
+            type_str += f"({taille})"
     return type_str
 
 
 # parcours des instructions DDL pour reconstruire le modèle de données complet
-def parse_ddl_to_model(ddl_text: str) -> DataModel:
+def conversion_ddl_pydantic(ddl_texte: str) -> ModelePydantic:
     """
-    dialect : conservé pour tracer l'origine du fichier / pouvoir router vers
-    un autre parseur (ex: sqlglot) en cas d'échec. simple-ddl-parser n'exige
-    pas de sélection explicite du dialecte : il gère nativement MySQL,
-    PostgreSQL, TSQL/MSSQL, Oracle, Snowflake, Redshift, HQL...
+    simple-ddl-parser n'exige pas de sélection explicite du dialecte, il gère nativement :
+    MySQL, PostgreSQL,TSQL/MSSQL,Oracle,Snowflake Redshift, HQL...
     """
-    parsed = DDLParser(ddl_text, normalize_names=True).run(group_by_type=False)
-
-    model = DataModel()
+    # extraction du contenu SQL parsé en objets de structure de table
+    parsed = DDLParser(ddl_texte, normalize_names=True).run(group_by_type=False)
+    # initialisation du modèle pivot qui recevra les tables et relations
+    modele  = ModelePydantic()
 
     # parcours des tables du DDL pour les transformer en objets Table et Column
     for raw_table in parsed:
+        # si l'élément ne contient pas de colonnes, il ne s'agit pas d'une table SQL
         if "columns" not in raw_table:
-            # Ce n'est pas un CREATE TABLE (index, alter isolé, etc.) -> on ignore ici
+            print("Ce n'est pas un CREATE TABLE (index, alter isolé, etc.)")
             continue
 
-        table_name = raw_table["table_name"]
-        pk_columns = set(raw_table.get("primary_key") or [])
+        nom_table = raw_table["table_name"]
+        pk_colonnes = set(raw_table.get("primary_key") or [])
 
-        table = Table(name=table_name, schema_name=raw_table.get("schema"))
+        table = Table(name=nom_table, schema_name=raw_table.get("schema"))
 
+        # parcours des colonnes pour construire chaque objet Column et ses relations FK
         for raw_col in raw_table["columns"]:
-            col_name = raw_col["name"]
+            nom_colonne = raw_col["name"]
             fk = None
-            ref = raw_col.get("references")
-            if ref:
-                fk = ForeignKey(ref_table=ref["table"], ref_column=ref["column"][0]
-                                 if isinstance(ref["column"], list) else ref["column"])
-                model.relations.append(
+            reference = raw_col.get("references")
+            # si la colonne référence une autre table, on construit la clé étrangère associée
+            if reference:
+                # si la référence est fournie sous forme de liste, on prend le premier élément
+                fk = CleEtrangere(ref_table=reference["table"], ref_column=reference["column"][0]
+                                 if isinstance(reference["column"], list) else reference["column"])
+                modele.relations.append(
                     Relation(
-                        from_table=table_name,
-                        from_column=col_name,
+                        from_table=nom_table,
+                        from_column=nom_colonne,
                         to_table=fk.ref_table,
                         to_column=fk.ref_column,
                     )
                 )
 
             table.columns.append(
-                Column(
-                    name=col_name,
+                Colonne(
+                    name=nom_colonne,
                     type=column_type_to_str(raw_col),
                     nullable=raw_col.get("nullable", True),
-                    is_pk=col_name in pk_columns,
+                    is_pk=nom_colonne in pk_colonnes,
                     fk=fk,
                 )
             )
 
-        model.tables.append(table)
+        modele.tables.append(table)
 
     # Gère les FK déclarées via ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY,
     # que simple-ddl-parser restitue comme statements 'alter' séparés.
     # parcours des instructions ALTER pour détecter les contraintes FK supplémentaires
-    for raw_stmt in parsed:
-        for alter in raw_stmt.get("alter", {}).get("columns", []) if isinstance(raw_stmt.get("alter"), dict) else []:
+    for declaration_alter in parsed:
+        for alter in declaration_alter.get("alter", {}).get("columns", []) if isinstance(declaration_alter.get("alter"), dict) else []:
             pass  # structure variable selon version -> à adapter si vos DDL utilisent ce style
 
-    return model
+    return modele
 
 
 # --------------------------------------------------------------------------- #
@@ -157,10 +162,12 @@ GRID_SPACING_Y = 260
 
 
 # parcours des colonnes pour produire l'étiquette lisible de chaque champ
-def column_label(col: Column) -> str:
+def column_label(col: Colonne) -> str:
     prefix = ""
+    # si la colonne est une clé primaire, on ajoute un symbole PK
     if col.is_pk:
         prefix += "🔑 "
+    # si la colonne est une clé étrangère, on ajoute un symbole FK
     if col.fk:
         prefix += "🔗 "
     nul = "" if col.nullable else " NN"
@@ -178,11 +185,14 @@ def table_label(table: Table) -> str:
     # parcours des colonnes pour ajouter les tags PK/FK et le type
     for col in table.columns:
         tags = []
+        # si la colonne est primaire, on marque le tag PK
         if col.is_pk:
             tags.append("PK")
+        # si la colonne est étrangère, on marque le tag FK
         if col.fk:
             tags.append("FK")
         prefix = ", ".join(tags) if tags else ""
+        # si des tags existent, on espace le libellé pour conserver une colonne alignée
         if prefix:
             prefix = f"{prefix:<5} "
         lines.append(f"{prefix}{col.name} : {col.type}")
@@ -190,7 +200,7 @@ def table_label(table: Table) -> str:
 
 
 # parcours des tables pour écrire le fichier GraphML de sortie
-def build_graphml(model: DataModel, output_path: Path) -> None:
+def build_graphml(model: ModelePydantic, output_path: Path) -> None:
     """Génère un fichier GraphML exploitable par yEd."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -200,6 +210,7 @@ def build_graphml(model: DataModel, output_path: Path) -> None:
     ET.register_namespace("x", "http://www.yworks.com/xml/graphml")
     ET.register_namespace("y", "http://www.yworks.com/xml/graphml")
 
+    # création de la racine GraphML et des clés de nœuds / arêtes
     root = ET.Element(
         "{http://graphml.graphdrawing.org/xmlns}graphml",
         {"version": "3.0"},
@@ -216,8 +227,10 @@ def build_graphml(model: DataModel, output_path: Path) -> None:
         "yfiles.type": "edgegraphics",
     })
 
+    # création du graphe GraphML principal
     graph = ET.SubElement(root, "{http://graphml.graphdrawing.org/xmlns}graph", {"edgedefault": "directed"})
 
+    # calcul du nombre de colonnes de la grille pour l'organisation visuelle
     cols_per_row = max(1, math.ceil(math.sqrt(len(model.tables))))
 
     # Parcours des tables
@@ -262,11 +275,14 @@ def build_graphml(model: DataModel, output_path: Path) -> None:
         field_lines = []
         for col in table.columns:
             tags = []
+            # si la colonne est clé primaire, on ajoute le tag PK
             if col.is_pk:
                 tags.append("PK")
+            # si la colonne est clé étrangère, on ajoute le tag FK
             if col.fk:
                 tags.append("FK")
             prefix = ", ".join(tags) if tags else ""
+            # si des tags existent, on aligne le préfixe pour garder un format lisible
             if prefix:
                 prefix = f"{prefix:<5} "
             field_lines.append(f"{prefix}{col.name} : {col.type}")
@@ -295,6 +311,7 @@ def build_graphml(model: DataModel, output_path: Path) -> None:
     for rel in model.relations:
         source_id = node_id(rel.from_table)
         target_id = node_id(rel.to_table)
+        # si la relation est bien définie entre deux nœuds graphml, on crée l'arête
         edge = ET.SubElement(graph, "{http://graphml.graphdrawing.org/xmlns}edge",
                              {"id": f"e_{source_id}_{target_id}", "source": source_id, "target": target_id})
         data = ET.SubElement(edge, "{http://graphml.graphdrawing.org/xmlns}data", {"key": "d1"})
@@ -306,12 +323,13 @@ def build_graphml(model: DataModel, output_path: Path) -> None:
                               {"alignment": "center", "backgroundColor": "#ffffff", "fontFamily": "Dialog", "fontSize": "11"})
         label.text = rel.from_column
 
+    # écriture du fichier GraphML final sur disque
     tree = ET.ElementTree(root)
     tree.write(output_path, encoding="utf-8", xml_declaration=True)
 
 
 # parcours du modèle pour générer le diagramme Draw.io final
-def build_drawio(model: DataModel, output_path: Path) -> None:
+def build_drawio(model: ModelePydantic, output_path: Path) -> None:
     file = drawpyo.File()
     file.file_path = str(output_path.parent)
     file.file_name = output_path.name
@@ -338,6 +356,7 @@ def build_drawio(model: DataModel, output_path: Path) -> None:
         # création du conteneur de table (nom de la table)
         header = drawpyo.diagram.Object(
             page=page,
+            id=table.name,
             value=table.name.upper(),
             position=(x, y)
         )
@@ -352,6 +371,7 @@ def build_drawio(model: DataModel, output_path: Path) -> None:
         for j, col in enumerate(table.columns):
             row = drawpyo.diagram.Object(
                 page=page,
+                id=f"{table.name}.{col.name}",
                 value=column_label(col),
                 parent=header,
                 position_rel_to_parent=(0, HEADER_HEIGHT + j * ROW_HEIGHT),
@@ -364,14 +384,19 @@ def build_drawio(model: DataModel, output_path: Path) -> None:
             row_objects[(table.name, col.name)] = row
 
     # parcours des relations pour tracer les arêtes FK entre tables
+    compteur_cles_etrangeres: dict[str, int] = {}
     for rel in model.relations:
-        source = row_objects.get((rel.from_table, rel.from_column))
-        target = row_objects.get((rel.to_table, rel.to_column))
-        if source is None or target is None:
+        source      = row_objects.get((rel.from_table, rel.from_column))
+        destination = row_objects.get((rel.to_table, rel.to_column))
+        # si l'origine ou la cible n'existe pas, on ignore la relation incomplète
+        if source is None or destination is None:
             # La table référencée n'est pas définie dans le fichier -> on ignore l'arête
             continue
 
-        edge = drawpyo.diagram.Edge(page=page, source=source, target=target)
+        compteur_cles_etrangeres[rel.from_table] = compteur_cles_etrangeres.get(rel.from_table, 0) + 1
+        edge_id = f"{rel.from_table}.cle_etrangere_{compteur_cles_etrangeres[rel.from_table]}"
+
+        edge = drawpyo.diagram.Edge(page=page, id=edge_id, source=source, target=destination)
         edge.waypoints       = "entity_relation"
         edge.line_end_target = "ERone"
         edge.line_end_source = "ERmany"
@@ -381,10 +406,13 @@ def build_drawio(model: DataModel, output_path: Path) -> None:
     file.write()
     # parcours du fichier XML généré pour forcer la grille et la page en mode masqué
     generated_file = Path(file.file_path) / file.file_name
+    # si le fichier drawio a bien été généré, on le nettoie pour masquer la grille et la page
     if generated_file.exists():
         content = generated_file.read_text(encoding="utf-8")
+        # si la grille est activée, on la désactive pour obtenir un rendu plus propre
         if 'grid="1"' in content:
             content = content.replace('grid="1"', 'grid="0"')
+        # si l'aperçu de page est actif, on le désactive pour un rendu plein écran
         if 'page="1"' in content:
             content = content.replace('page="1"', 'page="0"')
         generated_file.write_text(content, encoding="utf-8")
@@ -418,21 +446,26 @@ def main() -> None:
     ddl_text = input_path.read_text(encoding="utf-8")
 
     # fabrication du DataModel à partir du contenu du fichier sql en entrée
-    model = parse_ddl_to_model(ddl_text)
+    model = conversion_ddl_pydantic(ddl_text)
 
-    print(f"{len(model.tables)} table(s) détectée(s) :")
+    # affichage du résumé détecté dans le modèle SQL
+    print(f"{len(model.tables)} tables détectées :")
     for t in model.tables:
         pk = [c.name for c in t.columns if c.is_pk]
         fk = [c.name for c in t.columns if c.fk]
-        print(f"  - {t.name} : {len(t.columns)} colonne(s), PK={pk}, FK={fk}")
-    print(f"{len(model.relations)} relation(s) FK détectée(s).")
+        print(f"  - {t.name} : {len(t.columns)} colonnes, PK={pk}, FK={fk}")
+    print(f"{len(model.relations)} relations FK détectées.")
 
+    # génération du diagramme drawio à partir du modèle
     build_drawio(model, drawio_path)
     print(f"Fichier drawio généré : {drawio_path}")
 
+    # génération du diagramme graphml à partir du même modèle
     build_graphml(model, graphml_path)
     print(f"Fichier graphml généré : {graphml_path}")
+    # print(model.model_dump_json(indent=2))
 
 
+# si le script est exécuté directement, on lance le traitement principal
 if __name__ == "__main__":
     main()
