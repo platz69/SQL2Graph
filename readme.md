@@ -87,6 +87,7 @@ Puis XML au format .drawio :
 </mxfile>
 ```
 Visuellement :
+
 ┌───────────────────────────────┐
 
 │ orders                        │
