@@ -11,7 +11,7 @@ import math
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
-# bibliothèques externes (3rd party)
+# bibliothèques tierces
 from pydantic import BaseModel, Field
 from simple_ddl_parser import DDLParser
 import drawpyo
@@ -19,10 +19,8 @@ import drawpyo
 """
     Définition de Classes en utilisant pydantic
     Syntaxe :
-    • "= True" pour dclarer la valeur par défaut
-    • "CleEtrangere | None = None" se lit "(CleEtrangere | None) = None", c-à-d :
-        • None est un type explicitement accepté  
-        • la valeur par défaut est None
+    • "= True" pour déclarer la valeur par défaut
+    • "CleEtrangere | None = None" signifie : le type peut être CleEtrangere ou None, et la valeur par défaut est None
 """
 
 class CleEtrangere(BaseModel):
@@ -50,10 +48,10 @@ class Colonne(BaseModel):
 class Table(BaseModel):
     # Exemple :
     #     t = Table(
-    #     name="users",
+    #     nom="users",
     #     columns=[
-    #         Column(name="id", type="INT", is_pk=True),
-    #         Column(name="email", type="VARCHAR(255)", nullable=False),
+    #         Column(nom="id", type="INT", is_pk=True),
+    #         Column(nom="email", type="VARCHAR(255)", nullable=False),
     #     ]
     # )
     name:        str
@@ -189,9 +187,8 @@ def node_id(table_name: str) -> str:
     return "n_" + ''.join(ch if ch.isalnum() else '_' for ch in table_name).strip('_')
 
 
-# parcours des tables pour écrire le fichier GraphML de sortie
+# conversion du modèle en graphml
 def construction_graphml(model: ModelePydantic, output_path: Path) -> None:
-    """Génère un fichier GraphML exploitable par yEd."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     ET.register_namespace("", "http://graphml.graphdrawing.org/xmlns")
@@ -240,7 +237,7 @@ def construction_graphml(model: ModelePydantic, output_path: Path) -> None:
                                          "alignment": "center",
                                          "autoSizePolicy": "content",
                                          "backgroundColor": "#FFFFE1",
-                                         "configuration": "com.yworks.entityRelationship.label.name",
+                                         "configuration": "com.yworks.entityRelationship.label.nom",
                                          "fontFamily": "Courier",
                                          "fontSize": "12",
                                          "fontStyle": "plain",
@@ -313,8 +310,9 @@ def construction_graphml(model: ModelePydantic, output_path: Path) -> None:
     tree.write(output_path, encoding="utf-8", xml_declaration=True)
 
 
-# parcours du modèle pour générer le diagramme Draw.io final
+# conversion du modèle en drawio avec drawpyo avec ElementTree
 def construction_drawio(model: ModelePydantic, output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     file = drawpyo.File()
     file.file_path = str(output_path.parent)
     file.file_name = output_path.name
@@ -386,18 +384,91 @@ def construction_drawio(model: ModelePydantic, output_path: Path) -> None:
         edge.endFill_source  = False
 
     file.write()
-    # parcours du fichier XML généré pour forcer la grille et la page en mode masqué
+
+    # drawpyo ne gère pas le paramètre "page" donc il faut le modifier soi-même :
     generated_file = Path(file.file_path) / file.file_name
-    # si le fichier drawio a bien été généré, on le nettoie pour masquer la grille et la page
-    if generated_file.exists():
-        content = generated_file.read_text(encoding="utf-8")
-        # # si la grille est activée, on la désactive pour obtenir un rendu plus propre
-        # if 'grid="1"' in content:
-        #     content = content.replace('grid="1"', 'grid="0"')
-        # si l'aperçu de page est actif, on le désactive pour un rendu plein écran
-        if 'page="1"' in content:
-            content = content.replace('page="1"', 'page="0"')
-        generated_file.write_text(content, encoding="utf-8")
+    content = generated_file.read_text(encoding="utf-8")
+    content = content.replace('page="1"', 'page="0"')
+    generated_file.write_text(content, encoding="utf-8")
+
+
+# conversion du modèle en drawio avec ElementTree
+def construction_drawio_v2(model: ModelePydantic, output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # création de la racine mxfile / diagram / mxGraphModel / root, propres au format drawio
+    mxfile = ET.Element("mxfile",
+                        {"host": "ElementTree", "type": "device"})
+    diagram = ET.SubElement(mxfile, "diagram",
+                            {"name": "Page-1", "id": "1"})
+    graph_model = ET.SubElement(diagram, "mxGraphModel",
+                                {"dx": "800", "dy": "600", "grid": "0", "gridSize": "10", "guides": "1",
+        "tooltips": "1", "connect": "1", "arrows": "1", "fold": "1", "page": "0",
+        "pageScale": "1", "pageWidth": "850", "pageHeight": "1100", "math": "0", "shadow": "0",
+    })
+    root = ET.SubElement(graph_model, "root")
+    ET.SubElement(root, "mxCell", {"id": "0"})
+    ET.SubElement(root, "mxCell", {"id": "1", "parent": "0"})
+
+    n_tables = len(model.tables)
+    cols_per_row = max(1, math.ceil(math.sqrt(n_tables)))
+
+    # parcours des tables pour créer le conteneur et les lignes de champs
+    for i, table in enumerate(model.tables):
+        x, y = position_grille(i, cols_per_row)
+
+        # création du conteneur de table (nom de la table)
+        header_cell = ET.SubElement(root, "mxCell", {
+            "id": table.name,
+            "value": table.name.upper(),
+            "style": "whiteSpace=wrap;rounded=0;dashed=0;align=center;verticalAlign=top;",
+            "vertex": "1",
+            "parent": "1",
+        })
+        ET.SubElement(header_cell, "mxGeometry", {
+            "x": str(x), "y": str(y), "width": str(LARGEUR_TABLE), "height": str(hauteur_table(table)), "as": "geometry",
+        })
+
+        # parcours des colonnes pour créer les lignes de champs de la table
+        for j, col in enumerate(table.columns):
+            row_cell = ET.SubElement(root, "mxCell", {
+                "id": f"{table.name}.{col.name}",
+                "value": calcul_label_colonne(col),
+                "style": "whiteSpace=wrap;rounded=0;dashed=0;align=left;verticalAlign=middle;spacingLeft=8;",
+                "vertex": "1",
+                "parent": table.name,
+            })
+            ET.SubElement(row_cell, "mxGeometry", {
+                "x": "0", "y": str(HAUTEUR_TITRE + j * HAUTEUR_LIGNE), "width": str(LARGEUR_TABLE), "height": str(HAUTEUR_LIGNE), "as": "geometry",
+            })
+
+    # parcours des relations pour tracer les arêtes FK entre tables, avec vérification d'existence des lignes
+    existing_row_ids = {f"{table.name}.{col.name}" for table in model.tables for col in table.columns}
+    compteur_cles_etrangeres: dict[str, int] = {}
+    for rel in model.relations:
+        source_id      = f"{rel.table_source}.{rel.colonne_source}"
+        destination_id = f"{rel.table_destination}.{rel.colonne_destination}"
+        # si l'origine ou la cible n'existe pas, on ignore la relation incomplète
+        if source_id not in existing_row_ids or destination_id not in existing_row_ids:
+            # La table référencée n'est pas définie dans le fichier -> on ignore l'arête
+            continue
+
+        compteur_cles_etrangeres[rel.table_source] = compteur_cles_etrangeres.get(rel.table_source, 0) + 1
+        edge_id = f"{rel.table_source}.cle_etrangere_{compteur_cles_etrangeres[rel.table_source]}"
+
+        edge_cell = ET.SubElement(root, "mxCell", {
+            "id": edge_id,
+            "style": "edgeStyle=entityRelationEdgeStyle;elbow=vertical;rounded=0;jettySize=auto;startArrow=ERmany;endArrow=ERone;",
+            "edge": "1",
+            "parent": "1",
+            "source": source_id,
+            "target": destination_id,
+        })
+        ET.SubElement(edge_cell, "mxGeometry", {"relative": "1", "as": "geometry"})
+
+    # écriture du fichier drawio final sur disque
+    tree = ET.ElementTree(mxfile)
+    tree.write(output_path, encoding="utf-8", xml_declaration=False)
 
 
 # --------------------------------------------------------------------------- #
@@ -417,12 +488,13 @@ def main() -> None:
 
     # fabrication des chemins à partir des arguments fournis en ligne de commande
 
-    input_path = Path("./input") / "MySQL.sql"
+    input_path = Path("./input") / "PostgreSQL.10.sql"
     # stem = ddl_path.stem if ddl_path.stem else "MySQL"
     output_dir = Path("./output")
     output_dir.mkdir(parents=True, exist_ok=True)
-    drawio_path  = output_dir / "MySQL.drawio"
-    graphml_path = output_dir / "MySQL.graphml"
+    input_stem = input_path.stem
+    drawio_path  = output_dir / f"{input_stem}.drawio"
+    graphml_path = output_dir / f"{input_stem}.graphml"
 
     # lecture du fichier sql en entrée
     ddl_text = input_path.read_text(encoding="utf-8")
@@ -438,14 +510,14 @@ def main() -> None:
         print(f"  - {t.name} : {len(t.columns)} colonnes, PK={pk}, FK={fk}")
     print(f"{len(model.relations)} relations FK détectées.")
 
-    # génération du diagramme drawio à partir du modèle
-    construction_drawio(model, drawio_path)
-    print(f"Fichier drawio généré : {drawio_path}")
-
     # génération du diagramme graphml à partir du même modèle
     construction_graphml(model, graphml_path)
     print(f"Fichier graphml généré : {graphml_path}")
     # print(model.model_dump_json(indent=2))
+
+    # génération du diagramme drawio à partir du modèle
+    construction_drawio_v2(model, drawio_path)
+    print(f"Fichier drawio généré : {drawio_path}")
 
 
 # si le script est exécuté directement, on lance le traitement principal
