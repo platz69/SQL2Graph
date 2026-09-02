@@ -3,7 +3,7 @@ Convertit un .sql en Modèle Physique de Données (MPD)
 
 Enchaînement des conversions :
  SQL --simple_ddl_parser-->  pydantic --build_drawio         -->   .drawio
-                                      --construction_graphml -->   .graphml
+                                      --construction_graphml_ET -->   .graphml
 """
 
 # bibliothèques standard (stdlib)
@@ -187,73 +187,53 @@ def node_id(table_name: str) -> str:
     return "n_" + ''.join(ch if ch.isalnum() else '_' for ch in table_name).strip('_')
 
 
-# conversion du modèle en graphml
-def construction_graphml(model: ModelePydantic, output_path: Path) -> None:
+# parcours des tables pour écrire le fichier GraphML de sortie
+def construction_graphml_ET(model: ModelePydantic, output_path: Path) -> None:
+    """Génère un fichier GraphML exploitable par yEd."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # --- 1. structure racine du document GraphML ---
+
+    """ ----------en-tête à graphml construire------------------
+        <?xml version='1.0' encoding='utf-8'?>
+            <graphml xmlns="http://graphml.graphdrawing.org/xmlns" xmlns:y="http://www.yworks.com/xml/graphml" version="3.0">
+                <key id="d0" for="node" yfiles.type="nodegraphics"/>
+                <key id="d1" for="edge" yfiles.type="edgegraphics"/>
+                <graph edgedefault="directed">"""
 
     ET.register_namespace("", "http://graphml.graphdrawing.org/xmlns")
     ET.register_namespace("x", "http://www.yworks.com/xml/graphml")
     ET.register_namespace("y", "http://www.yworks.com/xml/graphml")
 
-    # création de la racine GraphML et des clés de nœuds / arêtes
-    root = ET.Element(
-        "{http://graphml.graphdrawing.org/xmlns}graphml",
-        {"version": "3.0"},
-    )
-
-    ET.SubElement(root, "{http://graphml.graphdrawing.org/xmlns}key", {
-        "id": "d0",
-        "for": "node",
-        "yfiles.type": "nodegraphics",
-    })
-    ET.SubElement(root, "{http://graphml.graphdrawing.org/xmlns}key", {
-        "id": "d1",
-        "for": "edge",
-        "yfiles.type": "edgegraphics",
-    })
-
-    # création du graphe GraphML principal
+    root = ET.Element("{http://graphml.graphdrawing.org/xmlns}graphml", {"version": "3.0"})
+    ET.SubElement(root, "{http://graphml.graphdrawing.org/xmlns}key", {"id": "d0", "for": "node", "yfiles.type": "nodegraphics"})
+    ET.SubElement(root, "{http://graphml.graphdrawing.org/xmlns}key", {"id": "d1", "for": "edge", "yfiles.type": "edgegraphics"})
     graph = ET.SubElement(root, "{http://graphml.graphdrawing.org/xmlns}graph", {"edgedefault": "directed"})
 
-    # calcul du nombre de tables par ligne dans le graphe
-    nb_tables_par_ligne = max(1, math.ceil(math.sqrt(len(model.tables))))
+    # --- 2. calcul de la disposition des tables en grille ---
+    cols_par_ligne = max(1, math.ceil(math.sqrt(len(model.tables))))
 
-    # positionnement de chaque table
+    # --- 3. création d'un nœud par table, avec ses colonnes en libellé ---
     for i, table in enumerate(model.tables):
-        x, y = position_grille(i, nb_tables_par_ligne)
+        x, y = position_grille(i, cols_par_ligne)
 
-        nid = node_id(table.name)
-        node = ET.SubElement(graph, "{http://graphml.graphdrawing.org/xmlns}node", {"id": nid})
+        node = ET.SubElement(graph, "{http://graphml.graphdrawing.org/xmlns}node", {"id": node_id(table.name)})
         data = ET.SubElement(node, "{http://graphml.graphdrawing.org/xmlns}data", {"key": "d0"})
         shape = ET.SubElement(data, "{http://www.yworks.com/xml/graphml}GenericNode", {"configuration": "com.yworks.entityRelationship.big_entity"})
         ET.SubElement(shape, "{http://www.yworks.com/xml/graphml}Geometry",
                       {"x": str(x), "y": str(y), "width": str(LARGEUR_TABLE), "height": str(hauteur_table(table))})
-        # ET.SubElement(shape, "{http://www.yworks.com/xml/graphml}Fill",
-        #               {"color": "#dae8fc", "transparent": "false"})
-        # ET.SubElement(shape, "{http://www.yworks.com/xml/graphml}BorderStyle",
-        #               {"color": "#6c8ebf", "type": "line", "width": "1.0"})
-        header_label = ET.SubElement(shape, "{http://www.yworks.com/xml/graphml}NodeLabel",
-                                     {
-                                         "alignment": "center",
-                                         "autoSizePolicy": "content",
-                                         "backgroundColor": "#FFFFE1",
-                                         "configuration": "com.yworks.entityRelationship.label.nom",
-                                         "fontFamily": "Courier",
-                                         "fontSize": "12",
-                                         "fontStyle": "plain",
-                                         "hasLineColor": "false",
-                                         "horizontalTextPosition": "center",
-                                         "iconTextGap": "4",
-                                         "modelName": "internal",
-                                         "modelPosition": "t",
-                                         "textColor": "#000000",
-                                         "verticalTextPosition": "bottom",
-                                         "visible": "true",
-                                         "xml:space": "preserve",
-                                     })
+
+        # libellé du titre (nom de la table)
+        header_label = ET.SubElement(shape, "{http://www.yworks.com/xml/graphml}NodeLabel", {
+            "alignment": "center", "autoSizePolicy": "content", "backgroundColor": "#FFFFE1",
+            "configuration": "com.yworks.entityRelationship.label.nom", "fontFamily": "Courier", "fontSize": "12",
+            "fontStyle": "plain", "hasLineColor": "false", "horizontalTextPosition": "center", "iconTextGap": "4",
+            "modelName": "internal", "modelPosition": "t", "textColor": "#000000", "verticalTextPosition": "bottom",
+            "visible": "true", "xml:space": "preserve",
+        })
         header_label.text = table.name.upper()
 
-        # Parcours des colonnes de la table
+        # libellé des champs (une ligne par colonne, avec tags PK/FK)
         field_lines = []
         for col in table.columns:
             tags = []
@@ -269,50 +249,130 @@ def construction_graphml(model: ModelePydantic, output_path: Path) -> None:
                 prefix = f"{prefix:<5} "
             field_lines.append(f"{prefix}{col.name} : {col.type}")
 
-        fields_label = ET.SubElement(shape, "{http://www.yworks.com/xml/graphml}NodeLabel",
-                                     {
-                                         "alignment": "left",
-                                         "autoSizePolicy": "content",
-                                         "backgroundColor": "#FFFFFF",
-                                         "configuration": "com.yworks.entityRelationship.label.attributes",
-                                         "fontFamily": "Courier",
-                                         "fontSize": "12",
-                                         "underlined": "false",
-                                         "fontStyle": "plain",
-                                         "hasLineColor": "false",
-                                         "horizontalTextPosition": "center",
-                                         "iconTextGap": "4",
-                                         "modelName": "custom",
-                                         "textColor": "#000000",
-                                         "verticalTextPosition": "bottom",
-                                         "visible": "true",
-                                         "xml:space": "preserve",
-                                     })
+        fields_label = ET.SubElement(shape, "{http://www.yworks.com/xml/graphml}NodeLabel", {
+            "alignment": "left", "autoSizePolicy": "content", "backgroundColor": "#FFFFFF",
+            "configuration": "com.yworks.entityRelationship.label.attributes", "fontFamily": "Courier", "fontSize": "12",
+            "underlined": "false", "fontStyle": "plain", "hasLineColor": "false", "horizontalTextPosition": "center",
+            "iconTextGap": "4", "modelName": "custom", "textColor": "#000000", "verticalTextPosition": "bottom",
+            "visible": "true", "xml:space": "preserve",
+        })
         fields_label.text = "\n".join(field_lines)
 
+    # --- 4. création d'une arête par relation FK, en ignorant les relations incomplètes ---
+    noms_tables = {table.name for table in model.tables}
+    compteur_cles_etrangeres: dict[str, int] = {}
     for rel in model.relations:
-        source_id = node_id(rel.table_source)
-        target_id = node_id(rel.table_destination)
-        # si la relation est bien définie entre deux nœuds graphml, on crée l'arête
+        # si la table source ou la table cible n'existe pas, on ignore la relation incomplète
+        if rel.table_source not in noms_tables or rel.table_destination not in noms_tables:
+            continue
+
+        compteur_cles_etrangeres[rel.table_source] = compteur_cles_etrangeres.get(rel.table_source, 0) + 1
+        edge_id = f"{rel.table_source}.cle_etrangere_{compteur_cles_etrangeres[rel.table_source]}"
+
         edge = ET.SubElement(graph, "{http://graphml.graphdrawing.org/xmlns}edge",
-                             {"id": f"e_{source_id}_{target_id}", "source": source_id, "target": target_id})
+                             {"id": edge_id, "source": node_id(rel.table_source), "target": node_id(rel.table_destination)})
         data = ET.SubElement(edge, "{http://graphml.graphdrawing.org/xmlns}data", {"key": "d1"})
         poly = ET.SubElement(data, "{http://www.yworks.com/xml/graphml}PolyLineEdge")
-        ET.SubElement(poly, "{http://www.yworks.com/xml/graphml}LineStyle",
-                      {"color": "#000000", "type": "line", "width": "1.0"})
+        ET.SubElement(poly, "{http://www.yworks.com/xml/graphml}LineStyle", {"color": "#000000", "type": "line", "width": "1.0"})
         ET.SubElement(poly, "{http://www.yworks.com/xml/graphml}Arrows", {"source": "none", "target": "standard"})
         label = ET.SubElement(poly, "{http://www.yworks.com/xml/graphml}EdgeLabel",
                               {"alignment": "center", "backgroundColor": "#ffffff", "fontFamily": "Dialog", "fontSize": "11"})
         label.text = rel.colonne_source
 
-    # écriture du fichier GraphML final sur disque
+    # --- 5. écriture du fichier GraphML final sur disque ---
     tree = ET.ElementTree(root)
     tree.write(output_path, encoding="utf-8", xml_declaration=True)
 
 
-# conversion du modèle en drawio avec drawpyo avec ElementTree
-def construction_drawio(model: ModelePydantic, output_path: Path) -> None:
+# parcours du modèle pour générer le diagramme Draw.io final, en ElementTree pur (sans drawpyo)
+def construction_drawio_ET(model: ModelePydantic, output_path: Path) -> None:
+    """Génère un fichier .drawio exploitable par draw.io / diagrams.net, en ElementTree pur (sans drawpyo)."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # --- 1. structure racine du document drawio ---
+
+    """ ----------en-tête drawio à construire------------------
+    <mxfile host="ElementTree" type="device">
+	<diagram name="Page-1" id="1">
+		<mxGraphModel dx="800" dy="600" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+			<root>
+				<mxCell id="0"/>
+				<mxCell id="1" parent="0"/>"""
+
+    mxfile = ET.Element("mxfile", {"host": "ElementTree", "type": "device"})
+    diagram = ET.SubElement(mxfile, "diagram", {"name": "Page-1", "id": "1"})
+    graph_model = ET.SubElement(diagram, "mxGraphModel", {
+        "dx": "800", "dy": "600", "grid": "0", "gridSize": "10", "guides": "1",
+        "tooltips": "1", "connect": "1", "arrows": "1", "fold": "1", "page": "0",
+        "pageScale": "1", "pageWidth": "850", "pageHeight": "1100", "math": "0", "shadow": "0",
+    })
+    root = ET.SubElement(graph_model, "root")
+    ET.SubElement(root, "mxCell", {"id": "0"})
+    ET.SubElement(root, "mxCell", {"id": "1", "parent": "0"})
+
+    # --- 2. calcul de la disposition des tables en grille +/- carrée ---
+    cols_par_ligne = max(1, math.ceil(math.sqrt(len(model.tables))))
+
+    # --- 3. création d'un nœud <mxCell> par table, avec ses colonnes en libellé ---
+    for i, table in enumerate(model.tables):
+        x, y = position_grille(i, cols_par_ligne)
+
+        # libellé du titre (nom de la table)
+        header_cell = ET.SubElement(root, "mxCell", {
+            "id": table.name,
+            "value": table.name.upper(),
+            "style": "whiteSpace=wrap;rounded=0;dashed=0;align=center;verticalAlign=top;",
+            "vertex": "1",
+            "parent": "1",
+        })
+        ET.SubElement(header_cell, "mxGeometry", {
+            "x": str(x), "y": str(y), "width": str(LARGEUR_TABLE), "height": str(hauteur_table(table)), "as": "geometry",
+        })
+
+        # libellé des champs (une ligne par colonne, avec tags PK/FK)
+        for j, col in enumerate(table.columns):
+            row_cell = ET.SubElement(root, "mxCell", {
+                "id": f"{table.name}.{col.name}",
+                "value": calcul_label_colonne(col),
+                "style": "whiteSpace=wrap;rounded=0;dashed=0;align=left;verticalAlign=middle;spacingLeft=8;",
+                "vertex": "1",
+                "parent": table.name,
+            })
+            ET.SubElement(row_cell, "mxGeometry", {
+                "x": "0", "y": str(HAUTEUR_TITRE + j * HAUTEUR_LIGNE), "width": str(LARGEUR_TABLE), "height": str(HAUTEUR_LIGNE), "as": "geometry",
+            })
+
+    # --- 4. création d'une arête par relation FK, en ignorant les relations incomplètes ---
+    noms_colonnes = {f"{table.name}.{col.name}" for table in model.tables for col in table.columns}
+    compteur_cles_etrangeres: dict[str, int] = {}
+    for rel in model.relations:
+        source_id      = f"{rel.table_source}.{rel.colonne_source}"
+        destination_id = f"{rel.table_destination}.{rel.colonne_destination}"
+        # si la colonne source ou la colonne cible n'existe pas, on ignore la relation incomplète
+        if source_id not in noms_colonnes or destination_id not in noms_colonnes:
+            continue
+
+        compteur_cles_etrangeres[rel.table_source] = compteur_cles_etrangeres.get(rel.table_source, 0) + 1
+        edge_id = f"{rel.table_source}.cle_etrangere_{compteur_cles_etrangeres[rel.table_source]}"
+
+        edge_cell = ET.SubElement(root, "mxCell", {
+            "id": edge_id,
+            "style": "edgeStyle=entityRelationEdgeStyle;elbow=vertical;rounded=0;jettySize=auto;startArrow=ERmany;endArrow=ERone;",
+            "edge": "1",
+            "parent": "1",
+            "source": source_id,
+            "target": destination_id,
+        })
+        ET.SubElement(edge_cell, "mxGeometry", {"relative": "1", "as": "geometry"})
+
+    # --- 5. écriture du fichier drawio final sur disque ---
+    tree = ET.ElementTree(mxfile)
+    tree.write(output_path, encoding="utf-8", xml_declaration=False)
+
+
+
+# parcours du modèle pour générer le diagramme Draw.io final
+def construction_drawio_drawpyo(model: ModelePydantic, output_path: Path) -> None:
     file = drawpyo.File()
     file.file_path = str(output_path.parent)
     file.file_name = output_path.name
@@ -392,85 +452,6 @@ def construction_drawio(model: ModelePydantic, output_path: Path) -> None:
     generated_file.write_text(content, encoding="utf-8")
 
 
-# conversion du modèle en drawio avec ElementTree
-def construction_drawio_v2(model: ModelePydantic, output_path: Path) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # création de la racine mxfile / diagram / mxGraphModel / root, propres au format drawio
-    mxfile = ET.Element("mxfile",
-                        {"host": "ElementTree", "type": "device"})
-    diagram = ET.SubElement(mxfile, "diagram",
-                            {"name": "Page-1", "id": "1"})
-    graph_model = ET.SubElement(diagram, "mxGraphModel",
-                                {"dx": "800", "dy": "600", "grid": "0", "gridSize": "10", "guides": "1",
-        "tooltips": "1", "connect": "1", "arrows": "1", "fold": "1", "page": "0",
-        "pageScale": "1", "pageWidth": "850", "pageHeight": "1100", "math": "0", "shadow": "0",
-    })
-    root = ET.SubElement(graph_model, "root")
-    ET.SubElement(root, "mxCell", {"id": "0"})
-    ET.SubElement(root, "mxCell", {"id": "1", "parent": "0"})
-
-    n_tables = len(model.tables)
-    cols_per_row = max(1, math.ceil(math.sqrt(n_tables)))
-
-    # parcours des tables pour créer le conteneur et les lignes de champs
-    for i, table in enumerate(model.tables):
-        x, y = position_grille(i, cols_per_row)
-
-        # création du conteneur de table (nom de la table)
-        header_cell = ET.SubElement(root, "mxCell", {
-            "id": table.name,
-            "value": table.name.upper(),
-            "style": "whiteSpace=wrap;rounded=0;dashed=0;align=center;verticalAlign=top;",
-            "vertex": "1",
-            "parent": "1",
-        })
-        ET.SubElement(header_cell, "mxGeometry", {
-            "x": str(x), "y": str(y), "width": str(LARGEUR_TABLE), "height": str(hauteur_table(table)), "as": "geometry",
-        })
-
-        # parcours des colonnes pour créer les lignes de champs de la table
-        for j, col in enumerate(table.columns):
-            row_cell = ET.SubElement(root, "mxCell", {
-                "id": f"{table.name}.{col.name}",
-                "value": calcul_label_colonne(col),
-                "style": "whiteSpace=wrap;rounded=0;dashed=0;align=left;verticalAlign=middle;spacingLeft=8;",
-                "vertex": "1",
-                "parent": table.name,
-            })
-            ET.SubElement(row_cell, "mxGeometry", {
-                "x": "0", "y": str(HAUTEUR_TITRE + j * HAUTEUR_LIGNE), "width": str(LARGEUR_TABLE), "height": str(HAUTEUR_LIGNE), "as": "geometry",
-            })
-
-    # parcours des relations pour tracer les arêtes FK entre tables, avec vérification d'existence des lignes
-    existing_row_ids = {f"{table.name}.{col.name}" for table in model.tables for col in table.columns}
-    compteur_cles_etrangeres: dict[str, int] = {}
-    for rel in model.relations:
-        source_id      = f"{rel.table_source}.{rel.colonne_source}"
-        destination_id = f"{rel.table_destination}.{rel.colonne_destination}"
-        # si l'origine ou la cible n'existe pas, on ignore la relation incomplète
-        if source_id not in existing_row_ids or destination_id not in existing_row_ids:
-            # La table référencée n'est pas définie dans le fichier -> on ignore l'arête
-            continue
-
-        compteur_cles_etrangeres[rel.table_source] = compteur_cles_etrangeres.get(rel.table_source, 0) + 1
-        edge_id = f"{rel.table_source}.cle_etrangere_{compteur_cles_etrangeres[rel.table_source]}"
-
-        edge_cell = ET.SubElement(root, "mxCell", {
-            "id": edge_id,
-            "style": "edgeStyle=entityRelationEdgeStyle;elbow=vertical;rounded=0;jettySize=auto;startArrow=ERmany;endArrow=ERone;",
-            "edge": "1",
-            "parent": "1",
-            "source": source_id,
-            "target": destination_id,
-        })
-        ET.SubElement(edge_cell, "mxGeometry", {"relative": "1", "as": "geometry"})
-
-    # écriture du fichier drawio final sur disque
-    tree = ET.ElementTree(mxfile)
-    tree.write(output_path, encoding="utf-8", xml_declaration=False)
-
-
 # --------------------------------------------------------------------------- #
 # 4. CLI
 # --------------------------------------------------------------------------- #
@@ -511,12 +492,12 @@ def main() -> None:
     print(f"{len(model.relations)} relations FK détectées.")
 
     # génération du diagramme graphml à partir du même modèle
-    construction_graphml(model, graphml_path)
+    construction_graphml_ET(model, graphml_path)
     print(f"Fichier graphml généré : {graphml_path}")
     # print(model.model_dump_json(indent=2))
 
     # génération du diagramme drawio à partir du modèle
-    construction_drawio_v2(model, drawio_path)
+    construction_drawio_ET(model, drawio_path)
     print(f"Fichier drawio généré : {drawio_path}")
 
 
