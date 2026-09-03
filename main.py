@@ -89,8 +89,7 @@ def conversion_type_colonne_en_str(col: dict) -> str:
 
 def conversion_ddl_en_pydantic(ddl_texte: str) -> ModelePydantic:
     """
-    simple-ddl-parser n'exige pas de sélection explicite du dialecte, il gère nativement :
-    MySQL, PostgreSQL,TSQL/MSSQL,Oracle,Snowflake Redshift, HQL...
+    via analyse par simple-ddl-parser
     """
     # extraction du contenu SQL parsé en objets de structure de table
     parsed = DDLParser(ddl_texte, normalize_names=True).run(group_by_type=False)
@@ -100,13 +99,27 @@ def conversion_ddl_en_pydantic(ddl_texte: str) -> ModelePydantic:
 
     # parcours des tables du DDL pour les transformer en objets Table et Column
     for raw_table in parsed:
-        # si l'élément ne contient pas de colonnes, il ne s'agit pas d'une table SQL
         if "columns" not in raw_table:
             print("Ce n'est pas un CREATE TABLE (index, alter isolé, etc.)")
             continue
 
         nom_table = raw_table["table_name"]
+        alter = raw_table.get("alter") if isinstance(raw_table.get("alter"), dict) else {}
+
+        # les PK inline (colonne déclarée "PRIMARY KEY" dans le CREATE TABLE) sont dans primary_key,
+        # mais quand la PK est ajoutée via ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY (cas le plus
+        # courant en pg_dump), elle se trouve dans alter["primary_keys"] -> on fusionne les deux sources
         pk_colonnes = set(raw_table.get("primary_key") or [])
+        for pk_decl in alter.get("primary_keys", []):
+            pk_colonnes.update(pk_decl.get("columns", []))
+
+        # idem pour les FK : quand elles sont ajoutées via ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY,
+        # simple-ddl-parser les restitue dans alter["columns"] (une entrée par colonne source avec "references")
+        fk_par_colonne = {
+            alter_col["name"]: alter_col["references"]
+            for alter_col in alter.get("columns", [])
+            if alter_col.get("references")
+        }
 
         table = Table(name=nom_table, schema_name=raw_table.get("schema"))
 
@@ -114,7 +127,8 @@ def conversion_ddl_en_pydantic(ddl_texte: str) -> ModelePydantic:
         for raw_col in raw_table["columns"]:
             nom_colonne = raw_col["name"]
             fk = None
-            reference = raw_col.get("references")
+            # la référence peut être inline (raw_col["references"]) ou déclarée via ALTER (fk_par_colonne)
+            reference = raw_col.get("references") or fk_par_colonne.get(nom_colonne)
             # si la colonne référence une autre table, on construit la clé étrangère associée
             if reference:
                 # si la référence est fournie sous forme de liste, on prend le premier élément
@@ -141,13 +155,6 @@ def conversion_ddl_en_pydantic(ddl_texte: str) -> ModelePydantic:
 
         modele.tables.append(table)
 
-    # Gère les FK déclarées via ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY,
-    # que simple-ddl-parser restitue comme statements 'alter' séparés.
-    # parcours des instructions ALTER pour détecter les contraintes FK supplémentaires
-    for declaration_alter in parsed:
-        for alter in declaration_alter.get("alter", {}).get("columns", []) if isinstance(declaration_alter.get("alter"), dict) else []:
-            pass  # structure variable selon version -> à adapter si vos DDL utilisent ce style
-
     return modele
 
 
@@ -170,7 +177,7 @@ def hauteur_table(table: Table) -> int:
 
 
 # parcours des colonnes pour produire l'étiquette lisible de chaque champ
-def calcul_label_colonne(col: Colonne) -> str:
+def calcul_label_colonne_drawio(col: Colonne) -> str:
     prefix = ""
     # si la colonne est une clé primaire, on ajoute un symbole PK
     if col.is_pk:
@@ -178,6 +185,8 @@ def calcul_label_colonne(col: Colonne) -> str:
     # si la colonne est une clé étrangère, on ajoute un symbole FK
     if col.fk:
         prefix += "🔗 "
+    # si la colonne n'est ni une clé primaire ni une clé étrangère, on ajoute quand même un préfixe pour respecter l'alignement des champs
+
     nul = "" if col.nullable else " NN"
     return f"{prefix}{col.name} : {col.type}{nul}"
 
@@ -233,7 +242,7 @@ def construction_graphml_ET(model: ModelePydantic, output_path: Path) -> None:
         })
         header_label.text = table.name.upper()
 
-        # libellé des champs (une ligne par colonne, avec tags PK/FK)
+        # ajout des éventuels préfixes (PK, FK) et suffixe (NOT NULL) au nom d'une colonne
         field_lines = []
         for col in table.columns:
             tags = []
@@ -247,7 +256,8 @@ def construction_graphml_ET(model: ModelePydantic, output_path: Path) -> None:
             # si des tags existent, on aligne le préfixe pour garder un format lisible
             if prefix:
                 prefix = f"{prefix:<5} "
-            field_lines.append(f"{prefix}{col.name} : {col.type}")
+            nul = "" if col.nullable else " NN"
+            field_lines.append(f"{prefix}{col.name} : {col.type}{nul}")
 
         fields_label = ET.SubElement(shape, "{http://www.yworks.com/xml/graphml}NodeLabel", {
             "alignment": "left", "autoSizePolicy": "content", "backgroundColor": "#FFFFFF",
@@ -333,7 +343,7 @@ def construction_drawio_ET(model: ModelePydantic, output_path: Path) -> None:
         for j, col in enumerate(table.columns):
             row_cell = ET.SubElement(root, "mxCell", {
                 "id": f"{table.name}.{col.name}",
-                "value": calcul_label_colonne(col),
+                "value": calcul_label_colonne_drawio(col),
                 "style": "whiteSpace=wrap;rounded=0;dashed=0;align=left;verticalAlign=middle;spacingLeft=8;",
                 "vertex": "1",
                 "parent": table.name,
@@ -412,7 +422,7 @@ def construction_drawio_drawpyo(model: ModelePydantic, output_path: Path) -> Non
             row = drawpyo.diagram.Object(
                 page=page,
                 id=f"{table.name}.{col.name}",
-                value=calcul_label_colonne(col),
+                value=calcul_label_colonne_drawio(col),
                 parent=header,
                 position_rel_to_parent=(0, HAUTEUR_TITRE + j * HAUTEUR_LIGNE),
             )
@@ -469,7 +479,9 @@ def main() -> None:
 
     # fabrication des chemins à partir des arguments fournis en ligne de commande
 
-    input_path = Path("./input") / "PostgreSQL.10.sql"
+    # input_path = Path("./input") / "MySQL.4.sql"
+    input_path = Path("./input") / "PostgreSQL.34.sql"
+    # input_path = Path("./input") / "SQLite.149.sql"
     # stem = ddl_path.stem if ddl_path.stem else "MySQL"
     output_dir = Path("./output")
     output_dir.mkdir(parents=True, exist_ok=True)
