@@ -1,0 +1,2 @@
+compare drawio/graphml/graphml d'origine
+PKs et FKs déclarées INLINE, ALTER, ou les 2 à la fois

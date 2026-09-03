@@ -16,11 +16,12 @@ from pydantic import BaseModel, Field
 from simple_ddl_parser import DDLParser
 import drawpyo
 
-"""
+""" _______________________________________________________________________________________________________________
     Définition de Classes en utilisant pydantic
     Syntaxe :
     • "= True" pour déclarer la valeur par défaut
     • "CleEtrangere | None = None" signifie : le type peut être CleEtrangere ou None, et la valeur par défaut est None
+    _______________________________________________________________________________________________________________
 """
 
 class CleEtrangere(BaseModel):
@@ -38,7 +39,7 @@ class Relation(BaseModel):
 
 
 class Colonne(BaseModel):
-    name: str
+    nom: str
     type: str
     nullable: bool = True # = True fixe la valeur par défaut
     is_pk: bool = False
@@ -49,27 +50,27 @@ class Table(BaseModel):
     # Exemple :
     #     t = Table(
     #     nom="users",
-    #     columns=[
+    #     colonnes=[
     #         Column(nom="id", type="INT", is_pk=True),
     #         Column(nom="email", type="VARCHAR(255)", nullable=False),
     #     ]
     # )
-    name:        str
-    schema_name: str | None = None
-    columns:     list[Colonne]  = Field(default_factory=list)
+    nom:        str
+    colonnes:     list[Colonne]  = Field(default_factory=list)
 
 
-class ModelePydantic(BaseModel):
+class Modele(BaseModel):
     """ BDD entière """
     tables:    list[Table]    = Field(default_factory=list)
     relations: list[Relation] = Field(default_factory=list)
 
     # parcours des tables pour retrouver une table par son nom
-    def get_table(self, name: str) -> Table | None:
-        return next((t for t in self.tables if t.name == name), None)
+    def get_table(self, nom: str) -> Table | None:
+        return next((t for t in self.tables if t.nom == nom), None)
 
-"""
-    Conversion SQL -> pydantic
+"""_______________________________________________________________________________________________________________
+    Conversion SQL -> pydantic -> Objets
+    _______________________________________________________________________________________________________________
 """
 
 def conversion_type_colonne_en_str(col: dict) -> str:
@@ -87,17 +88,17 @@ def conversion_type_colonne_en_str(col: dict) -> str:
     return type_str
 
 
-def conversion_ddl_en_pydantic(ddl_texte: str) -> ModelePydantic:
+def conversion_ddl_en_objets(ddl_texte: str) -> Modele:
     """
-    via analyse par simple-ddl-parser
+    analyse via simple-ddl-parser puis conversion en objets Modele, Table, Colonne, Relation, CleEtrangere
     """
-    # extraction du contenu SQL parsé en objets de structure de table
+    # analyse simple-ddl-parser
     parsed = DDLParser(ddl_texte, normalize_names=True).run(group_by_type=False)
 
-    # initialisation du modèle pydantic qui recevra les tables et relations
-    modele  = ModelePydantic()
+    # initialisation du modèle pydantic qui recevra les objets tables et relations
+    modele = Modele()
 
-    # parcours des tables du DDL pour les transformer en objets Table et Column
+    # parcours des tables du résultat de simple-ddl-parser
     for raw_table in parsed:
         if "columns" not in raw_table:
             print("Ce n'est pas un CREATE TABLE (index, alter isolé, etc.)")
@@ -121,7 +122,7 @@ def conversion_ddl_en_pydantic(ddl_texte: str) -> ModelePydantic:
             if alter_col.get("references")
         }
 
-        table = Table(name=nom_table, schema_name=raw_table.get("schema"))
+        table = Table(nom=nom_table)
 
         # parcours des colonnes pour construire chaque objet Column et ses relations FK
         for raw_col in raw_table["columns"]:
@@ -143,9 +144,9 @@ def conversion_ddl_en_pydantic(ddl_texte: str) -> ModelePydantic:
                     )
                 )
 
-            table.columns.append(
+            table.colonnes.append(
                 Colonne(
-                    name=nom_colonne,
+                    nom=nom_colonne,
                     type=conversion_type_colonne_en_str(raw_col),
                     nullable=raw_col.get("nullable", True),
                     is_pk=nom_colonne in pk_colonnes,
@@ -158,9 +159,10 @@ def conversion_ddl_en_pydantic(ddl_texte: str) -> ModelePydantic:
     return modele
 
 
-# --------------------------------------------------------------------------- #
-# modèle pydantic -> .drawio + .graphml
-# --------------------------------------------------------------------------- #
+""" _____________________________________________________________________________________________________
+        Conversion Objet -> .drawio + .graphml
+_________________________________________________________________________________________________________
+"""
 
 LARGEUR_TABLE, HAUTEUR_LIGNE, HAUTEUR_TITRE, ESPACEMENT_X, ESPACEMENT_Y = 220, 26, 30, 300, 260
 
@@ -173,7 +175,7 @@ def position_grille(index: int, cols_per_row: int) -> tuple[int, int]:
 
 # hauteur totale d'une table (titre + une ligne par colonne), factorisée pour drawio et graphml
 def hauteur_table(table: Table) -> int:
-    return HAUTEUR_TITRE + HAUTEUR_LIGNE * max(1, len(table.columns))
+    return HAUTEUR_TITRE + HAUTEUR_LIGNE * max(1, len(table.colonnes))
 
 
 # parcours des colonnes pour produire l'étiquette lisible de chaque champ
@@ -188,16 +190,16 @@ def calcul_label_colonne_drawio(col: Colonne) -> str:
     # si la colonne n'est ni une clé primaire ni une clé étrangère, on ajoute quand même un préfixe pour respecter l'alignement des champs
 
     nul = "" if col.nullable else " NN"
-    return f"{prefix}{col.name} : {col.type}{nul}"
+    return f"{prefix}{col.nom} : {col.type}{nul}"
 
 
 # parcours des caractères du nom de table pour générer un identifiant XML sûr
-def node_id(table_name: str) -> str:
-    return "n_" + ''.join(ch if ch.isalnum() else '_' for ch in table_name).strip('_')
+def ET_node_to_clean_str(table_nom: str) -> str:
+    return "n_" + ''.join(ch if ch.isalnum() else '_' for ch in table_nom).strip('_')
 
 
 # parcours des tables pour écrire le fichier GraphML de sortie
-def construction_graphml_ET(model: ModelePydantic, output_path: Path) -> None:
+def construction_graphml_ET(model: Modele, output_path: Path) -> None:
     """Génère un fichier GraphML exploitable par yEd."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -226,7 +228,7 @@ def construction_graphml_ET(model: ModelePydantic, output_path: Path) -> None:
     for i, table in enumerate(model.tables):
         x, y = position_grille(i, cols_par_ligne)
 
-        node = ET.SubElement(graph, "{http://graphml.graphdrawing.org/xmlns}node", {"id": node_id(table.name)})
+        node = ET.SubElement(graph, "{http://graphml.graphdrawing.org/xmlns}node", {"id": ET_node_to_clean_str(table.nom)})
         data = ET.SubElement(node, "{http://graphml.graphdrawing.org/xmlns}data", {"key": "d0"})
         shape = ET.SubElement(data, "{http://www.yworks.com/xml/graphml}GenericNode", {"configuration": "com.yworks.entityRelationship.big_entity"})
         ET.SubElement(shape, "{http://www.yworks.com/xml/graphml}Geometry",
@@ -240,24 +242,23 @@ def construction_graphml_ET(model: ModelePydantic, output_path: Path) -> None:
             "modelName": "internal", "modelPosition": "t", "textColor": "#000000", "verticalTextPosition": "bottom",
             "visible": "true", "xml:space": "preserve",
         })
-        header_label.text = table.name.upper()
+        header_label.text = table.nom.upper()
 
-        # ajout des éventuels préfixes (PK, FK) et suffixe (NOT NULL) au nom d'une colonne
-        field_lines = []
-        for col in table.columns:
-            tags = []
-            # si la colonne est clé primaire, on ajoute le tag PK
-            if col.is_pk:
-                tags.append("PK")
-            # si la colonne est clé étrangère, on ajoute le tag FK
-            if col.fk:
-                tags.append("FK")
-            prefix = ", ".join(tags) if tags else ""
-            # si des tags existent, on aligne le préfixe pour garder un format lisible
-            if prefix:
-                prefix = f"{prefix:<5} "
-            nul = "" if col.nullable else " NN"
-            field_lines.append(f"{prefix}{col.name} : {col.type}{nul}")
+        # # ajout des éventuels préfixes (PK, FK) et suffixe (NOT NULL) au nom d'une colonne
+        # field_lines = []
+        # for col in table.colonnes:
+        #     tags = []
+        #     # si la colonne est clé primaire, on ajoute le tag PK
+        #     if col.is_pk:
+        #         tags.append("🔑")
+        #     # si la colonne est clé étrangère, on ajoute le tag FK
+        #     if col.fk:
+        #         tags.append("🔗")
+        #     prefix = ", ".join(tags) if tags else ""
+        #     nul = "" if col.nullable else " NN"
+        #     field_lines.append(f"{prefix}{col.nom} : {col.type}{nul}")
+
+        field_lines = [calcul_label_colonne_drawio(col) for col in table.colonnes]
 
         fields_label = ET.SubElement(shape, "{http://www.yworks.com/xml/graphml}NodeLabel", {
             "alignment": "left", "autoSizePolicy": "content", "backgroundColor": "#FFFFFF",
@@ -269,7 +270,7 @@ def construction_graphml_ET(model: ModelePydantic, output_path: Path) -> None:
         fields_label.text = "\n".join(field_lines)
 
     # --- 4. création d'une arête par relation FK, en ignorant les relations incomplètes ---
-    noms_tables = {table.name for table in model.tables}
+    noms_tables = {table.nom for table in model.tables}
     compteur_cles_etrangeres: dict[str, int] = {}
     for rel in model.relations:
         # si la table source ou la table cible n'existe pas, on ignore la relation incomplète
@@ -280,7 +281,7 @@ def construction_graphml_ET(model: ModelePydantic, output_path: Path) -> None:
         edge_id = f"{rel.table_source}.cle_etrangere_{compteur_cles_etrangeres[rel.table_source]}"
 
         edge = ET.SubElement(graph, "{http://graphml.graphdrawing.org/xmlns}edge",
-                             {"id": edge_id, "source": node_id(rel.table_source), "target": node_id(rel.table_destination)})
+                             {"id": edge_id, "source": ET_node_to_clean_str(rel.table_source), "target": ET_node_to_clean_str(rel.table_destination)})
         data = ET.SubElement(edge, "{http://graphml.graphdrawing.org/xmlns}data", {"key": "d1"})
         poly = ET.SubElement(data, "{http://www.yworks.com/xml/graphml}PolyLineEdge")
         ET.SubElement(poly, "{http://www.yworks.com/xml/graphml}LineStyle", {"color": "#000000", "type": "line", "width": "1.0"})
@@ -291,11 +292,12 @@ def construction_graphml_ET(model: ModelePydantic, output_path: Path) -> None:
 
     # --- 5. écriture du fichier GraphML final sur disque ---
     tree = ET.ElementTree(root)
+    ET.indent(tree, space="  ")
     tree.write(output_path, encoding="utf-8", xml_declaration=True)
 
 
 # parcours du modèle pour générer le diagramme Draw.io final, en ElementTree pur (sans drawpyo)
-def construction_drawio_ET(model: ModelePydantic, output_path: Path) -> None:
+def construction_drawio_ET(model: Modele, output_path: Path) -> None:
     """Génère un fichier .drawio exploitable par draw.io / diagrams.net, en ElementTree pur (sans drawpyo)."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -329,8 +331,8 @@ def construction_drawio_ET(model: ModelePydantic, output_path: Path) -> None:
 
         # libellé du titre (nom de la table)
         header_cell = ET.SubElement(root, "mxCell", {
-            "id": table.name,
-            "value": table.name.upper(),
+            "id": table.nom,
+            "value": table.nom.upper(),
             "style": "whiteSpace=wrap;rounded=0;dashed=0;align=center;verticalAlign=top;",
             "vertex": "1",
             "parent": "1",
@@ -340,20 +342,20 @@ def construction_drawio_ET(model: ModelePydantic, output_path: Path) -> None:
         })
 
         # libellé des champs (une ligne par colonne, avec tags PK/FK)
-        for j, col in enumerate(table.columns):
+        for j, col in enumerate(table.colonnes):
             row_cell = ET.SubElement(root, "mxCell", {
-                "id": f"{table.name}.{col.name}",
+                "id": f"{table.nom}.{col.nom}",
                 "value": calcul_label_colonne_drawio(col),
                 "style": "whiteSpace=wrap;rounded=0;dashed=0;align=left;verticalAlign=middle;spacingLeft=8;",
                 "vertex": "1",
-                "parent": table.name,
+                "parent": table.nom,
             })
             ET.SubElement(row_cell, "mxGeometry", {
                 "x": "0", "y": str(HAUTEUR_TITRE + j * HAUTEUR_LIGNE), "width": str(LARGEUR_TABLE), "height": str(HAUTEUR_LIGNE), "as": "geometry",
             })
 
     # --- 4. création d'une arête par relation FK, en ignorant les relations incomplètes ---
-    noms_colonnes = {f"{table.name}.{col.name}" for table in model.tables for col in table.columns}
+    noms_colonnes = {f"{table.nom}.{col.nom}" for table in model.tables for col in table.colonnes}
     compteur_cles_etrangeres: dict[str, int] = {}
     for rel in model.relations:
         source_id      = f"{rel.table_source}.{rel.colonne_source}"
@@ -377,12 +379,13 @@ def construction_drawio_ET(model: ModelePydantic, output_path: Path) -> None:
 
     # --- 5. écriture du fichier drawio final sur disque ---
     tree = ET.ElementTree(mxfile)
+    ET.indent(tree, space="  ")
     tree.write(output_path, encoding="utf-8", xml_declaration=False)
 
 
 
 # parcours du modèle pour générer le diagramme Draw.io final
-def construction_drawio_drawpyo(model: ModelePydantic, output_path: Path) -> None:
+def construction_drawio_drawpyo(model: Modele, output_path: Path) -> None:
     file = drawpyo.File()
     file.file_path = str(output_path.parent)
     file.file_name = output_path.name
@@ -391,9 +394,9 @@ def construction_drawio_drawpyo(model: ModelePydantic, output_path: Path) -> Non
     # retirer l'aperçu de la grille
     page.grid = 0
 
-    # table_name -> objet drawpyo "conteneur"
+    # table_nom -> objet drawpyo "conteneur"
     table_objects: dict[str, "drawpyo.diagram.Object"] = {}
-    # (table_name, column_name) -> objet drawpyo "ligne", utile pour les arêtes FK
+    # (table_nom, column_nom) -> objet drawpyo "ligne", utile pour les arêtes FK
     row_objects: dict[tuple[str, str], "drawpyo.diagram.Object"] = {}
 
     n_tables = len(model.tables)
@@ -406,8 +409,8 @@ def construction_drawio_drawpyo(model: ModelePydantic, output_path: Path) -> Non
         # création du conteneur de table (nom de la table)
         header = drawpyo.diagram.Object(
             page=page,
-            id=table.name,
-            value=table.name.upper(),
+            id=table.nom,
+            value=table.nom.upper(),
             position=(x, y)
         )
         header.width = LARGEUR_TABLE
@@ -415,13 +418,13 @@ def construction_drawio_drawpyo(model: ModelePydantic, output_path: Path) -> Non
         header.apply_style_string(
             "whiteSpace=wrap;rounded=0;dashed=0;align=center;verticalAlign=top;"
         )
-        table_objects[table.name] = header
+        table_objects[table.nom] = header
 
         # parcours des colonnes pour créer les lignes de champs de la table
-        for j, col in enumerate(table.columns):
+        for j, col in enumerate(table.colonnes):
             row = drawpyo.diagram.Object(
                 page=page,
-                id=f"{table.name}.{col.name}",
+                id=f"{table.nom}.{col.nom}",
                 value=calcul_label_colonne_drawio(col),
                 parent=header,
                 position_rel_to_parent=(0, HAUTEUR_TITRE + j * HAUTEUR_LIGNE),
@@ -431,7 +434,7 @@ def construction_drawio_drawpyo(model: ModelePydantic, output_path: Path) -> Non
             row.apply_style_string(
                 "whiteSpace=wrap;rounded=0;dashed=0;align=left;verticalAlign=middle;spacingLeft=8;"
             )
-            row_objects[(table.name, col.name)] = row
+            row_objects[(table.nom, col.nom)] = row
 
     # parcours des relations pour tracer les arêtes FK entre tables
     compteur_cles_etrangeres: dict[str, int] = {}
@@ -453,35 +456,30 @@ def construction_drawio_drawpyo(model: ModelePydantic, output_path: Path) -> Non
         edge.endFill_target  = False
         edge.endFill_source  = False
 
-    file.write()
+    # conversion en ElementTree (nécessaire pour l'indentation)
+    xml_root = ET.fromstring(file.xml)
+    # désactive l'aperçu de la page
+    xml_root.find(".//mxGraphModel").set("page", "0")
+    # indentation
+    xml_tree = ET.ElementTree(xml_root)
+    ET.indent(xml_tree, space="  ")
 
-    # drawpyo ne gère pas le paramètre "page" donc il faut le modifier soi-même :
-    generated_file = Path(file.file_path) / file.file_name
-    content = generated_file.read_text(encoding="utf-8")
-    content = content.replace('page="1"', 'page="0"')
-    generated_file.write_text(content, encoding="utf-8")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    xml_tree.write(output_path, encoding="utf-8", xml_declaration=True)
 
 
-# --------------------------------------------------------------------------- #
-# 4. CLI
-# --------------------------------------------------------------------------- #
+""" _____________________________________________________________________________________________________
+        main()
+_________________________________________________________________________________________________________
+"""
 
 # parcours du fichier SQL d'entrée pour générer le diagramme et le graphml
 def main() -> None:
-    # gestion des arguments de la ligne de commande
-    # parser = argparse.ArgumentParser(description="Génère un MPD .drawio ou .graphml depuis un DDL SQL")
-    # parser.add_argument("--input", default="./input/MySQL.sql", help="Chemin du fichier DDL")
-    # parser.add_argument("--dialect", default="mysql", help="Dialecte SQL (informatif)")
-    # parser.add_argument("--format", choices=["drawio", "graphml", "both"], default="drawio",
-    #                     help="Format de sortie : drawio, graphml ou both")
-    # parser.add_argument("--output", default=None, help="Fichier de sortie; si omis, le nom est généré selon le format")
-    # args = parser.parse_args()
 
-    # fabrication des chemins à partir des arguments fournis en ligne de commande
-
-    # input_path = Path("./input") / "MySQL.4.sql"
-    input_path = Path("./input") / "PostgreSQL.34.sql"
+    input_path = Path("./input") / "MySQL.4.sql"
+    # input_path = Path("./input") / "PostgreSQL.34.sql"
     # input_path = Path("./input") / "SQLite.149.sql"
+    # input_path = Path("./input") / "MSSQL.188.sql"
     # stem = ddl_path.stem if ddl_path.stem else "MySQL"
     output_dir = Path("./output")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -493,14 +491,14 @@ def main() -> None:
     ddl_text = input_path.read_text(encoding="utf-8")
 
     # fabrication du modèle pydantic à partir du contenu du fichier sql en entrée
-    model = conversion_ddl_en_pydantic(ddl_text)
+    model = conversion_ddl_en_objets(ddl_text)
 
     # affichage du résumé détecté dans le modèle SQL
     print(f"{len(model.tables)} tables détectées :")
     for t in model.tables:
-        pk = [c.name for c in t.columns if c.is_pk]
-        fk = [c.name for c in t.columns if c.fk]
-        print(f"  - {t.name} : {len(t.columns)} colonnes, PK={pk}, FK={fk}")
+        pk = [c.nom for c in t.colonnes if c.is_pk]
+        fk = [c.nom for c in t.colonnes if c.fk]
+        print(f"  - {t.nom} : {len(t.colonnes)} colonnes, PK={pk}, FK={fk}")
     print(f"{len(model.relations)} relations FK détectées.")
 
     # génération du diagramme graphml à partir du même modèle
@@ -509,7 +507,8 @@ def main() -> None:
     # print(model.model_dump_json(indent=2))
 
     # génération du diagramme drawio à partir du modèle
-    construction_drawio_ET(model, drawio_path)
+    construction_drawio_drawpyo(model, drawio_path)
+    # construction_drawio_ET(model, drawio_path)
     print(f"Fichier drawio généré : {drawio_path}")
 
 
