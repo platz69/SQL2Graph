@@ -13,8 +13,8 @@ import xml.etree.ElementTree as ET
 
 # bibliothèques tierces
 from pydantic import BaseModel, Field
-from simple_ddl_parser import DDLParser
 import drawpyo
+from simple_ddl_parser import DDLParser
 
 """ _______________________________________________________________________________________________________________
     Définition de Classes en utilisant pydantic
@@ -55,8 +55,8 @@ class Table(BaseModel):
     #         Column(nom="email", type="VARCHAR(255)", nullable=False),
     #     ]
     # )
-    nom:        str
-    colonnes:     list[Colonne]  = Field(default_factory=list)
+    nom: str
+    colonnes: list[Colonne] = Field(default_factory=list)
 
 
 class Modele(BaseModel):
@@ -76,7 +76,7 @@ class Modele(BaseModel):
 def conversion_type_colonne_en_str(col: dict) -> str:
     """ Conversion dict -> str, exemple: VARCHAR(255)."""
     type_str = col.get("type") or ""
-    taille   = col.get("size")
+    taille   = col.get("size") or ""  # éviter taille = None sinon warning
     # si une taille est définie, on l'ajoute au type SQL
     if taille:
         # si la taille est un tuple ou une liste, on la transforme en format (a,b)
@@ -111,6 +111,9 @@ def conversion_ddl_en_objets(ddl_texte: str) -> Modele:
         # mais quand la PK est ajoutée via ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY (cas le plus
         # courant en pg_dump), elle se trouve dans alter["primary_keys"] -> on fusionne les deux sources
         pk_colonnes = set(raw_table.get("primary_key") or [])
+        # pour éviter un warning, on vérifie que alter est bien un dict (et pas None ou une autre structure)
+        if not isinstance(alter, dict):
+            raise ValueError(f"alter est None pour la table {nom_table}")  # sinon ça fait un warning
         for pk_decl in alter.get("primary_keys", []):
             pk_colonnes.update(pk_decl.get("columns", []))
 
@@ -132,6 +135,9 @@ def conversion_ddl_en_objets(ddl_texte: str) -> Modele:
             reference = raw_col.get("references") or fk_par_colonne.get(nom_colonne)
             # si la colonne référence une autre table, on construit la clé étrangère associée
             if reference:
+                # pour éviter un warning, on vérifie que la référence est bien un dict (et pas None ou une autre structure)
+                if not isinstance(reference, dict):
+                    raise ValueError(f"Format de référence invalide pour la colonne {nom_colonne}")
                 # si la référence est fournie sous forme de liste, on prend le premier élément
                 fk = CleEtrangere(ref_table=reference["table"], ref_colonne=reference["column"][0]
                                  if isinstance(reference["column"], list) else reference["column"])
@@ -166,11 +172,15 @@ ________________________________________________________________________________
 
 LARGEUR_TABLE, HAUTEUR_LIGNE, HAUTEUR_TITRE, ESPACEMENT_X, ESPACEMENT_Y = 220, 26, 30, 300, 260
 
+def calc_nb_cols_par_ligne(nb_tables: int) -> int:
+    return max(1, math.ceil(math.sqrt(nb_tables)))
+
+
 # calcule (x, y) d'une table dans la grille à partir de son index, factorisé pour drawio et graphml
-def position_grille(index: int, cols_per_row: int) -> tuple[int, int]:
-    grid_col = index % cols_per_row
-    grid_row = index // cols_per_row
-    return grid_col * ESPACEMENT_X, grid_row * ESPACEMENT_Y
+def position_grille(index: int, nb_nb_cols_par_ligne: int) -> tuple[int, int]:
+    numero_de_colonne = index % nb_nb_cols_par_ligne
+    numero_de_ligne = index // nb_nb_cols_par_ligne
+    return numero_de_colonne * ESPACEMENT_X, numero_de_ligne * ESPACEMENT_Y
 
 
 # hauteur totale d'une table (titre + une ligne par colonne), factorisée pour drawio et graphml
@@ -179,7 +189,7 @@ def hauteur_table(table: Table) -> int:
 
 
 # parcours des colonnes pour produire l'étiquette lisible de chaque champ
-def calcul_label_colonne_drawio(col: Colonne) -> str:
+def calcul_label_colonne(col: Colonne) -> str:
     prefix = ""
     # si la colonne est une clé primaire, on ajoute un symbole PK
     if col.is_pk:
@@ -195,13 +205,13 @@ def calcul_label_colonne_drawio(col: Colonne) -> str:
 
 # parcours des caractères du nom de table pour générer un identifiant XML sûr
 def ET_node_to_clean_str(table_nom: str) -> str:
-    return "n_" + ''.join(ch if ch.isalnum() else '_' for ch in table_nom).strip('_')
+    return "n_" + ''.join(caractere if caractere.isalnum() else '_' for caractere in table_nom).strip('_')
 
 
 # parcours des tables pour écrire le fichier GraphML de sortie
-def construction_graphml_ET(model: Modele, output_path: Path) -> None:
+def construction_graphml_ET(model: Modele, repertoire_output: Path) -> None:
     """Génère un fichier GraphML exploitable par yEd."""
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    repertoire_output.parent.mkdir(parents=True, exist_ok=True)
 
     # --- 1. structure racine du document GraphML ---
 
@@ -210,7 +220,8 @@ def construction_graphml_ET(model: Modele, output_path: Path) -> None:
             <graphml xmlns="http://graphml.graphdrawing.org/xmlns" xmlns:y="http://www.yworks.com/xml/graphml" version="3.0">
                 <key id="d0" for="node" yfiles.type="nodegraphics"/>
                 <key id="d1" for="edge" yfiles.type="edgegraphics"/>
-                <graph edgedefault="directed">"""
+                <graph edgedefault="directed">
+        ---------------------------------------------------------"""
 
     ET.register_namespace("", "http://graphml.graphdrawing.org/xmlns")
     ET.register_namespace("x", "http://www.yworks.com/xml/graphml")
@@ -221,12 +232,12 @@ def construction_graphml_ET(model: Modele, output_path: Path) -> None:
     ET.SubElement(root, "{http://graphml.graphdrawing.org/xmlns}key", {"id": "d1", "for": "edge", "yfiles.type": "edgegraphics"})
     graph = ET.SubElement(root, "{http://graphml.graphdrawing.org/xmlns}graph", {"edgedefault": "directed"})
 
-    # --- 2. calcul de la disposition des tables en grille ---
-    cols_par_ligne = max(1, math.ceil(math.sqrt(len(model.tables))))
+    # --- 2. calcul de la disposition des tables en grille +/- carrée ---
+    nb_nb_cols_par_ligne = calc_nb_cols_par_ligne(len(model.tables))
 
-    # --- 3. création d'un nœud par table, avec ses colonnes en libellé ---
+    # --- 3. création d'un nœud <mxCell> par table, avec ses colonnes en libellé ---
     for i, table in enumerate(model.tables):
-        x, y = position_grille(i, cols_par_ligne)
+        x, y = position_grille(i, nb_nb_cols_par_ligne)
 
         node = ET.SubElement(graph, "{http://graphml.graphdrawing.org/xmlns}node", {"id": ET_node_to_clean_str(table.nom)})
         data = ET.SubElement(node, "{http://graphml.graphdrawing.org/xmlns}data", {"key": "d0"})
@@ -243,23 +254,7 @@ def construction_graphml_ET(model: Modele, output_path: Path) -> None:
             "visible": "true", "xml:space": "preserve",
         })
         header_label.text = table.nom.upper()
-
-        # # ajout des éventuels préfixes (PK, FK) et suffixe (NOT NULL) au nom d'une colonne
-        # field_lines = []
-        # for col in table.colonnes:
-        #     tags = []
-        #     # si la colonne est clé primaire, on ajoute le tag PK
-        #     if col.is_pk:
-        #         tags.append("🔑")
-        #     # si la colonne est clé étrangère, on ajoute le tag FK
-        #     if col.fk:
-        #         tags.append("🔗")
-        #     prefix = ", ".join(tags) if tags else ""
-        #     nul = "" if col.nullable else " NN"
-        #     field_lines.append(f"{prefix}{col.nom} : {col.type}{nul}")
-
-        field_lines = [calcul_label_colonne_drawio(col) for col in table.colonnes]
-
+        field_lines = [calcul_label_colonne(col) for col in table.colonnes]
         fields_label = ET.SubElement(shape, "{http://www.yworks.com/xml/graphml}NodeLabel", {
             "alignment": "left", "autoSizePolicy": "content", "backgroundColor": "#FFFFFF",
             "configuration": "com.yworks.entityRelationship.label.attributes", "fontFamily": "Courier", "fontSize": "12",
@@ -276,7 +271,6 @@ def construction_graphml_ET(model: Modele, output_path: Path) -> None:
         # si la table source ou la table cible n'existe pas, on ignore la relation incomplète
         if rel.table_source not in noms_tables or rel.table_destination not in noms_tables:
             continue
-
         compteur_cles_etrangeres[rel.table_source] = compteur_cles_etrangeres.get(rel.table_source, 0) + 1
         edge_id = f"{rel.table_source}.cle_etrangere_{compteur_cles_etrangeres[rel.table_source]}"
 
@@ -293,25 +287,26 @@ def construction_graphml_ET(model: Modele, output_path: Path) -> None:
     # --- 5. écriture du fichier GraphML final sur disque ---
     tree = ET.ElementTree(root)
     ET.indent(tree, space="  ")
-    tree.write(output_path, encoding="utf-8", xml_declaration=True)
+    tree.write(repertoire_output, encoding="utf-8", xml_declaration=True)
 
 
 # parcours du modèle pour générer le diagramme Draw.io final, en ElementTree pur (sans drawpyo)
-def construction_drawio_ET(model: Modele, output_path: Path) -> None:
+def construction_drawio_ET(model: Modele, repertoire_output: Path) -> None:
     """Génère un fichier .drawio exploitable par draw.io / diagrams.net, en ElementTree pur (sans drawpyo)."""
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    repertoire_output.parent.mkdir(parents=True, exist_ok=True)
 
     # --- 1. structure racine du document drawio ---
 
-    """ ----------en-tête drawio à construire------------------
+    """ ----------en-tête drawio à obtenir------------------
     <mxfile host="ElementTree" type="device">
 	<diagram name="Page-1" id="1">
 		<mxGraphModel dx="800" dy="600" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
 			<root>
 				<mxCell id="0"/>
-				<mxCell id="1" parent="0"/>"""
+				<mxCell id="1" parent="0"/>
+		-----------------------------------------------------"""
 
-    mxfile = ET.Element("mxfile", {"host": "ElementTree", "type": "device"})
+    mxfile = ET.Element("mxfile", {"host": "ElementTree","type": "device"})
     diagram = ET.SubElement(mxfile, "diagram", {"name": "Page-1", "id": "1"})
     graph_model = ET.SubElement(diagram, "mxGraphModel", {
         "dx": "800", "dy": "600", "grid": "0", "gridSize": "10", "guides": "1",
@@ -323,11 +318,11 @@ def construction_drawio_ET(model: Modele, output_path: Path) -> None:
     ET.SubElement(root, "mxCell", {"id": "1", "parent": "0"})
 
     # --- 2. calcul de la disposition des tables en grille +/- carrée ---
-    cols_par_ligne = max(1, math.ceil(math.sqrt(len(model.tables))))
+    nb_cols_par_ligne = calc_nb_cols_par_ligne(len(model.tables))
 
     # --- 3. création d'un nœud <mxCell> par table, avec ses colonnes en libellé ---
     for i, table in enumerate(model.tables):
-        x, y = position_grille(i, cols_par_ligne)
+        x, y = position_grille(i, nb_cols_par_ligne)
 
         # libellé du titre (nom de la table)
         header_cell = ET.SubElement(root, "mxCell", {
@@ -345,7 +340,7 @@ def construction_drawio_ET(model: Modele, output_path: Path) -> None:
         for j, col in enumerate(table.colonnes):
             row_cell = ET.SubElement(root, "mxCell", {
                 "id": f"{table.nom}.{col.nom}",
-                "value": calcul_label_colonne_drawio(col),
+                "value": calcul_label_colonne(col),
                 "style": "whiteSpace=wrap;rounded=0;dashed=0;align=left;verticalAlign=middle;spacingLeft=8;",
                 "vertex": "1",
                 "parent": table.nom,
@@ -363,7 +358,6 @@ def construction_drawio_ET(model: Modele, output_path: Path) -> None:
         # si la colonne source ou la colonne cible n'existe pas, on ignore la relation incomplète
         if source_id not in noms_colonnes or destination_id not in noms_colonnes:
             continue
-
         compteur_cles_etrangeres[rel.table_source] = compteur_cles_etrangeres.get(rel.table_source, 0) + 1
         edge_id = f"{rel.table_source}.cle_etrangere_{compteur_cles_etrangeres[rel.table_source]}"
 
@@ -380,15 +374,18 @@ def construction_drawio_ET(model: Modele, output_path: Path) -> None:
     # --- 5. écriture du fichier drawio final sur disque ---
     tree = ET.ElementTree(mxfile)
     ET.indent(tree, space="  ")
-    tree.write(output_path, encoding="utf-8", xml_declaration=False)
+    tree.write(repertoire_output, encoding="utf-8", xml_declaration=False)
 
 
 
 # parcours du modèle pour générer le diagramme Draw.io final
-def construction_drawio_drawpyo(model: Modele, output_path: Path) -> None:
+def construction_drawio_drawpyo(model: Modele, repertoire_output: Path) -> None:
     file = drawpyo.File()
-    file.file_path = str(output_path.parent)
-    file.file_name = output_path.name
+    file.file_path = str(repertoire_output.parent)
+    file.file_name = repertoire_output.name
+
+    # --- 1. structure racine du document drawio ---
+
     page = drawpyo.Page(file=file)
 
     # retirer l'aperçu de la grille
@@ -399,12 +396,13 @@ def construction_drawio_drawpyo(model: Modele, output_path: Path) -> None:
     # (table_nom, column_nom) -> objet drawpyo "ligne", utile pour les arêtes FK
     row_objects: dict[tuple[str, str], "drawpyo.diagram.Object"] = {}
 
-    n_tables = len(model.tables)
-    cols_per_row = max(1, math.ceil(math.sqrt(n_tables)))
+    # --- 2. calcul de la disposition des tables en grille +/- carrée ---
+    nb_tables = len(model.tables)
+    nb_cols_par_ligne = calc_nb_cols_par_ligne(nb_tables)
 
-    # parcours des tables pour les placer dans la grille drawio
+    # --- 3. création d'un nœud par table, avec ses colonnes en libellé ---
     for i, table in enumerate(model.tables):
-        x, y = position_grille(i, cols_per_row)
+        x, y = position_grille(i, nb_cols_par_ligne)
 
         # création du conteneur de table (nom de la table)
         header = drawpyo.diagram.Object(
@@ -425,7 +423,7 @@ def construction_drawio_drawpyo(model: Modele, output_path: Path) -> None:
             row = drawpyo.diagram.Object(
                 page=page,
                 id=f"{table.nom}.{col.nom}",
-                value=calcul_label_colonne_drawio(col),
+                value=calcul_label_colonne(col),
                 parent=header,
                 position_rel_to_parent=(0, HAUTEUR_TITRE + j * HAUTEUR_LIGNE),
             )
@@ -436,7 +434,7 @@ def construction_drawio_drawpyo(model: Modele, output_path: Path) -> None:
             )
             row_objects[(table.nom, col.nom)] = row
 
-    # parcours des relations pour tracer les arêtes FK entre tables
+    # --- 4. création d'une arête par relation FK, en ignorant les relations incomplètes ---
     compteur_cles_etrangeres: dict[str, int] = {}
     for rel in model.relations:
         source      = row_objects.get((rel.table_source, rel.colonne_source))
@@ -459,13 +457,18 @@ def construction_drawio_drawpyo(model: Modele, output_path: Path) -> None:
     # conversion en ElementTree (nécessaire pour l'indentation)
     xml_root = ET.fromstring(file.xml)
     # désactive l'aperçu de la page
-    xml_root.find(".//mxGraphModel").set("page", "0")
+    # xml_root.find(".//mxGraphModel").set("page", "0")  # cette ligne seule déclenche un warning donc on coupe en 2
+    mx_graph_model = xml_root.find(".//mxGraphModel")
+    if mx_graph_model is None:
+        raise ValueError("Balise <mxGraphModel> introuvable dans le XML généré par drawpyo")
+    mx_graph_model.set("page", "0")
     # indentation
     xml_tree = ET.ElementTree(xml_root)
     ET.indent(xml_tree, space="  ")
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    xml_tree.write(output_path, encoding="utf-8", xml_declaration=True)
+    # --- 5. écriture du fichier drawio final sur disque ---
+    repertoire_output.parent.mkdir(parents=True, exist_ok=True)
+    xml_tree.write(repertoire_output, encoding="utf-8", xml_declaration=True)
 
 
 """ _____________________________________________________________________________________________________
@@ -479,7 +482,7 @@ def main() -> None:
     input_path = Path("./input") / "MySQL.4.sql"
     # input_path = Path("./input") / "PostgreSQL.34.sql"
     # input_path = Path("./input") / "SQLite.149.sql"
-    # input_path = Path("./input") / "MSSQL.188.sql"
+    # input_path = Path("./input") / "T-SQL.53.sql"  # Le caractère ‑ est un tiret cadratin/insécable (U+2011), pas un tiret ASCII - : source d'erreurs silencieuses si quelqu'un retape le nom du fichier à la main.
     # stem = ddl_path.stem if ddl_path.stem else "MySQL"
     output_dir = Path("./output")
     output_dir.mkdir(parents=True, exist_ok=True)

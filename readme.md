@@ -1,5 +1,12 @@
 Prend un ficherSQL de type DDL et le convertit en graphes pour Drawio et Yed.
 
+Les 3 fonctions construction_... sont découpées de la même façon :
+# --- 1. structure racine du document ---
+# --- 2. calcul de la disposition des tables en grille +/- carrée ---
+# --- 3. création d'un nœud par table, avec ses colonnes en libellé ---
+# --- 4. création d'une arête par relation FK, en ignorant les relations incomplètes ---
+# --- 5. écriture du fichier final sur disque ---
+
 Exemple avec 1 seule table ayant 1 clé étrangère:
 
 ```SQL
