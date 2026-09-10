@@ -3,7 +3,7 @@ Convertit un .sql en Modèle Physique de Données (MPD)
 
 Enchaînement des conversions :
  SQL --simple_ddl_parser-->  pydantic --build_drawio         -->   .drawio
-                                      --construction_graphml_ET -->   .graphml
+                                      --generer_graphml_ET -->   .graphml
 """
 
 # bibliothèques standard (stdlib)
@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 # bibliothèques tierces
 from pydantic import BaseModel, Field
 import drawpyo
-from simple_ddl_parser import DDLParser
+from simple_ddl_parser import DDLParser  # https://pypi.org/project/simple-ddl-parser/
 
 """ _______________________________________________________________________________________________________________
     Définition de Classes en utilisant pydantic
@@ -93,7 +93,8 @@ def conversion_ddl_en_objets(ddl_texte: str) -> Modele:
     analyse via simple-ddl-parser puis conversion en objets Modele, Table, Colonne, Relation, CleEtrangere
     """
     # analyse simple-ddl-parser
-    parsed = DDLParser(ddl_texte, normalize_names=True).run(group_by_type=False)
+    # Possible output_modes: ['redshift', 'spark_sql', 'mysql', 'bigquery', 'mssql', 'databricks', 'sqlite', 'vertics', 'ibm_db2', 'postgres', 'oracle', 'hql', 'snowflake', 'sql']
+    parsed = DDLParser(ddl_texte, normalize_names=True).run(group_by_type=False)  #, output_mode='mssql')  # output_mode='sql' est le mode par défaut, mais il ne gère pas les types SQL Server (ex: NVARCHAR))
 
     # initialisation du modèle pydantic qui recevra les objets tables et relations
     modele = Modele()
@@ -170,20 +171,57 @@ def conversion_ddl_en_objets(ddl_texte: str) -> Modele:
 _________________________________________________________________________________________________________
 """
 
-LARGEUR_TABLE, HAUTEUR_LIGNE, HAUTEUR_TITRE, ESPACEMENT_X, ESPACEMENT_Y = 220, 26, 30, 300, 260
+LARGEUR_TABLE, HAUTEUR_LIGNE, HAUTEUR_TITRE, ESPACEMENT_X, ESPACEMENT_Y = 220, 26, 26, 300, 250
 
 def calc_nb_cols_par_ligne(nb_tables: int) -> int:
     return max(1, math.ceil(math.sqrt(nb_tables)))
 
 
-# calcule (x, y) d'une table dans la grille à partir de son index, factorisé pour drawio et graphml
-def position_grille(index: int, nb_nb_cols_par_ligne: int) -> tuple[int, int]:
-    numero_de_colonne = index % nb_nb_cols_par_ligne
-    numero_de_ligne = index // nb_nb_cols_par_ligne
+# position (x, y) d'une table dans le graphe pur drawio
+def calcul_position_tables_unique(index: int, nb_cols_par_ligne: int) -> tuple[int, int]:
+    numero_de_colonne = index % nb_cols_par_ligne
+    numero_de_ligne = index // nb_cols_par_ligne
     return numero_de_colonne * ESPACEMENT_X, numero_de_ligne * ESPACEMENT_Y
 
 
-# hauteur totale d'une table (titre + une ligne par colonne), factorisée pour drawio et graphml
+# position (x, y) d'une table dans le graphe
+def calcul_position_tables(model: Modele) -> dict[str, tuple[int, int]]:
+    nb_cols_par_ligne = calc_nb_cols_par_ligne(len(model.tables))
+    positions: dict[str, tuple[int, int]] = {}
+
+    # la position de la table est obtenue par la division euclidienne de i par le nb max de table par ligne
+    for i, table in enumerate(model.tables):
+        numero_de_colonne = i % nb_cols_par_ligne
+        numero_de_ligne = i // nb_cols_par_ligne
+        positions[table.nom] = numero_de_colonne * ESPACEMENT_X, numero_de_ligne * ESPACEMENT_Y
+    return positions
+
+
+# position (x, y) d'une table dans le graphe sans chevauchement ('shelf packing')
+def calcul_position_tables_sans_chevauchement(model: Modele) -> dict[str, tuple[int, int]]:
+    nb_cols_par_ligne = calc_nb_cols_par_ligne(len(model.tables))
+    positions: dict[str, tuple[int, int]] = {}
+
+    x, y = 0, 0
+    col_courante = 0
+    hauteur_max_ligne = 0
+
+    for table in model.tables:
+        if col_courante == nb_cols_par_ligne:
+            x = 0
+            y += hauteur_max_ligne + ESPACEMENT_Y
+            col_courante = 0
+            hauteur_max_ligne = 0
+
+        positions[table.nom] = (x, y)
+        x += LARGEUR_TABLE + ESPACEMENT_X
+        hauteur_max_ligne = max(hauteur_max_ligne, hauteur_table(table))
+        col_courante += 1
+
+    return positions
+
+
+# hauteur totale d'une table ( 1 nom de table + n lignes)
 def hauteur_table(table: Table) -> int:
     return HAUTEUR_TITRE + HAUTEUR_LIGNE * max(1, len(table.colonnes))
 
@@ -209,9 +247,9 @@ def ET_node_to_clean_str(table_nom: str) -> str:
 
 
 # parcours des tables pour écrire le fichier GraphML de sortie
-def construction_graphml_ET(model: Modele, repertoire_output: Path) -> None:
+def generer_graphml_ET(model: Modele, chemin_de_sortie: Path) -> None:
     """Génère un fichier GraphML exploitable par yEd."""
-    repertoire_output.parent.mkdir(parents=True, exist_ok=True)
+    chemin_de_sortie.parent.mkdir(parents=True, exist_ok=True)
 
     # --- 1. structure racine du document GraphML ---
 
@@ -233,17 +271,18 @@ def construction_graphml_ET(model: Modele, repertoire_output: Path) -> None:
     graph = ET.SubElement(root, "{http://graphml.graphdrawing.org/xmlns}graph", {"edgedefault": "directed"})
 
     # --- 2. calcul de la disposition des tables en grille +/- carrée ---
-    nb_nb_cols_par_ligne = calc_nb_cols_par_ligne(len(model.tables))
+    # factorisé et appelé dans main()
 
     # --- 3. création d'un nœud <mxCell> par table, avec ses colonnes en libellé ---
     for i, table in enumerate(model.tables):
-        x, y = position_grille(i, nb_nb_cols_par_ligne)
+        # x, y = calcul_position_tables_unique(i, nb_cols_par_ligne)
+        # x, y = calcul_position_tables_sans_chevauchement(table.nom)
 
         node = ET.SubElement(graph, "{http://graphml.graphdrawing.org/xmlns}node", {"id": ET_node_to_clean_str(table.nom)})
         data = ET.SubElement(node, "{http://graphml.graphdrawing.org/xmlns}data", {"key": "d0"})
         shape = ET.SubElement(data, "{http://www.yworks.com/xml/graphml}GenericNode", {"configuration": "com.yworks.entityRelationship.big_entity"})
         ET.SubElement(shape, "{http://www.yworks.com/xml/graphml}Geometry",
-                      {"x": str(x), "y": str(y), "width": str(LARGEUR_TABLE), "height": str(hauteur_table(table))})
+                      {"x": str(position_table[table.nom][0]), "y": str(position_table[table.nom][1]), "width": str(LARGEUR_TABLE), "height": str(hauteur_table(table))})
 
         # libellé du titre (nom de la table)
         header_label = ET.SubElement(shape, "{http://www.yworks.com/xml/graphml}NodeLabel", {
@@ -287,13 +326,13 @@ def construction_graphml_ET(model: Modele, repertoire_output: Path) -> None:
     # --- 5. écriture du fichier GraphML final sur disque ---
     tree = ET.ElementTree(root)
     ET.indent(tree, space="  ")
-    tree.write(repertoire_output, encoding="utf-8", xml_declaration=True)
+    tree.write(chemin_de_sortie, encoding="utf-8", xml_declaration=True)
 
 
 # parcours du modèle pour générer le diagramme Draw.io final, en ElementTree pur (sans drawpyo)
-def construction_drawio_ET(model: Modele, repertoire_output: Path) -> None:
+def generer_drawio_ET(model: Modele, chemin_de_sortie: Path) -> None:
     """Génère un fichier .drawio exploitable par draw.io / diagrams.net, en ElementTree pur (sans drawpyo)."""
-    repertoire_output.parent.mkdir(parents=True, exist_ok=True)
+    chemin_de_sortie.parent.mkdir(parents=True, exist_ok=True)
 
     # --- 1. structure racine du document drawio ---
 
@@ -318,11 +357,15 @@ def construction_drawio_ET(model: Modele, repertoire_output: Path) -> None:
     ET.SubElement(root, "mxCell", {"id": "1", "parent": "0"})
 
     # --- 2. calcul de la disposition des tables en grille +/- carrée ---
-    nb_cols_par_ligne = calc_nb_cols_par_ligne(len(model.tables))
+    # factorisé et appelé dans main()
+    # nb_cols_par_ligne = calc_nb_cols_par_ligne(len(model.tables))
+    # positions = {}
+    # for i, table in enumerate(model.tables):
+    #     positions[table.nom] = calcul_position_tables_unique(i, nb_cols_par_ligne)
 
     # --- 3. création d'un nœud <mxCell> par table, avec ses colonnes en libellé ---
     for i, table in enumerate(model.tables):
-        x, y = position_grille(i, nb_cols_par_ligne)
+        # x, y = calcul_position_tables_unique(i, nb_cols_par_ligne)
 
         # libellé du titre (nom de la table)
         header_cell = ET.SubElement(root, "mxCell", {
@@ -333,7 +376,7 @@ def construction_drawio_ET(model: Modele, repertoire_output: Path) -> None:
             "parent": "1",
         })
         ET.SubElement(header_cell, "mxGeometry", {
-            "x": str(x), "y": str(y), "width": str(LARGEUR_TABLE), "height": str(hauteur_table(table)), "as": "geometry",
+            "x": str(position_table[table.nom][0]), "y": str(position_table[table.nom][1]), "width": str(LARGEUR_TABLE), "height": str(hauteur_table(table)), "as": "geometry",
         })
 
         # libellé des champs (une ligne par colonne, avec tags PK/FK)
@@ -374,15 +417,15 @@ def construction_drawio_ET(model: Modele, repertoire_output: Path) -> None:
     # --- 5. écriture du fichier drawio final sur disque ---
     tree = ET.ElementTree(mxfile)
     ET.indent(tree, space="  ")
-    tree.write(repertoire_output, encoding="utf-8", xml_declaration=False)
+    tree.write(chemin_de_sortie, encoding="utf-8", xml_declaration=False)
 
 
 
 # parcours du modèle pour générer le diagramme Draw.io final
-def construction_drawio_drawpyo(model: Modele, repertoire_output: Path) -> None:
+def generer_drawio_drawpyo(model: Modele, chemin_de_sortie: Path) -> None:
     file = drawpyo.File()
-    file.file_path = str(repertoire_output.parent)
-    file.file_name = repertoire_output.name
+    file.file_path = str(chemin_de_sortie.parent)
+    file.file_name = chemin_de_sortie.name
 
     # --- 1. structure racine du document drawio ---
 
@@ -397,19 +440,20 @@ def construction_drawio_drawpyo(model: Modele, repertoire_output: Path) -> None:
     row_objects: dict[tuple[str, str], "drawpyo.diagram.Object"] = {}
 
     # --- 2. calcul de la disposition des tables en grille +/- carrée ---
-    nb_tables = len(model.tables)
-    nb_cols_par_ligne = calc_nb_cols_par_ligne(nb_tables)
+    # factorisé et appel& dans main()
+    # nb_tables = len(model.tables)
+    # nb_cols_par_ligne = calc_nb_cols_par_ligne(nb_tables)
 
     # --- 3. création d'un nœud par table, avec ses colonnes en libellé ---
     for i, table in enumerate(model.tables):
-        x, y = position_grille(i, nb_cols_par_ligne)
+        # x, y = calcul_position_tables_unique(i, nb_cols_par_ligne)
 
         # création du conteneur de table (nom de la table)
         header = drawpyo.diagram.Object(
             page=page,
             id=table.nom,
             value=table.nom.upper(),
-            position=(x, y)
+            position=(position_table[table.nom][0], position_table[table.nom][1])
         )
         header.width = LARGEUR_TABLE
         header.height = hauteur_table(table)
@@ -467,8 +511,8 @@ def construction_drawio_drawpyo(model: Modele, repertoire_output: Path) -> None:
     ET.indent(xml_tree, space="  ")
 
     # --- 5. écriture du fichier drawio final sur disque ---
-    repertoire_output.parent.mkdir(parents=True, exist_ok=True)
-    xml_tree.write(repertoire_output, encoding="utf-8", xml_declaration=True)
+    chemin_de_sortie.parent.mkdir(parents=True, exist_ok=True)
+    xml_tree.write(chemin_de_sortie, encoding="utf-8", xml_declaration=True)
 
 
 """ _____________________________________________________________________________________________________
@@ -476,13 +520,19 @@ def construction_drawio_drawpyo(model: Modele, repertoire_output: Path) -> None:
 _________________________________________________________________________________________________________
 """
 
+position_table : dict[str, tuple[int, int]] = {}
+
 # parcours du fichier SQL d'entrée pour générer le diagramme et le graphml
 def main() -> None:
+    global position_table
 
     input_path = Path("./input") / "MySQL.4.sql"
     # input_path = Path("./input") / "PostgreSQL.34.sql"
-    # input_path = Path("./input") / "SQLite.149.sql"
-    # input_path = Path("./input") / "T-SQL.53.sql"  # Le caractère ‑ est un tiret cadratin/insécable (U+2011), pas un tiret ASCII - : source d'erreurs silencieuses si quelqu'un retape le nom du fichier à la main.
+    # input_path = Path("./input") / "SQLite.145.sql"
+    # input_path = Path("./input") / "MSSQL.53.sql"
+    # input_path = Path("./input") / "MSSQL.test.sql"
+    # input_path = Path("./input") / "MSSQL.test.GO.sql"
+    # input_path = Path("./input") / "MSSQL.188.sql"  # Le caractère ‑ est un tiret cadratin/insécable (U+2011),U pas un tiret ASCII - : source d'erreurs silencieuses si quelqu'un retape le nom du fichier à la main.
     # stem = ddl_path.stem if ddl_path.stem else "MySQL"
     output_dir = Path("./output")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -504,14 +554,18 @@ def main() -> None:
         print(f"  - {t.nom} : {len(t.colonnes)} colonnes, PK={pk}, FK={fk}")
     print(f"{len(model.relations)} relations FK détectées.")
 
+    # positionnment (x,y) des tables à l'avance car commun à tous les graphes
+    position_table = calcul_position_tables(model)
+
     # génération du diagramme graphml à partir du même modèle
-    construction_graphml_ET(model, graphml_path)
+    generer_graphml_ET(model, graphml_path)
     print(f"Fichier graphml généré : {graphml_path}")
     # print(model.model_dump_json(indent=2))
 
+
     # génération du diagramme drawio à partir du modèle
-    construction_drawio_drawpyo(model, drawio_path)
-    # construction_drawio_ET(model, drawio_path)
+    # generer_drawio_drawpyo(model, drawio_path)
+    generer_drawio_ET(model, drawio_path)
     print(f"Fichier drawio généré : {drawio_path}")
 
 
