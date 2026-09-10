@@ -1,3 +1,6 @@
+install :
+pip install pydantic drawpyo simple-ddl-parser numpy networkx
+
 Prend un ficherSQL de type DDL et le convertit en graphes pour Drawio et Yed.
 
 Les 3 fonctions construction_... sont découpées de la même façon :

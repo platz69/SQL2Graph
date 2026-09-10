@@ -14,7 +14,9 @@ import xml.etree.ElementTree as ET
 # bibliothèques tierces
 from pydantic import BaseModel, Field
 import drawpyo
-from simple_ddl_parser import DDLParser  # https://pypi.org/project/simple-ddl-parser/
+from simple_ddl_parser import DDLParser  # nom du package (simple_ddl_parser) <> nom du projet (simple-ddl-parser) cf https://pypi.org/project/simple-ddl-parser/
+import networkx as nx # nécessite "pip install numpy"
+# from networkx.drawing.nx_agraph import graphviz_layout # pour gérer l'anti-collision des noeuds du graphe
 
 """ _______________________________________________________________________________________________________________
     Définition de Classes en utilisant pydantic
@@ -177,11 +179,9 @@ def calc_nb_cols_par_ligne(nb_tables: int) -> int:
     return max(1, math.ceil(math.sqrt(nb_tables)))
 
 
-# position (x, y) d'une table dans le graphe pur drawio
-def calcul_position_tables_unique(index: int, nb_cols_par_ligne: int) -> tuple[int, int]:
-    numero_de_colonne = index % nb_cols_par_ligne
-    numero_de_ligne = index // nb_cols_par_ligne
-    return numero_de_colonne * ESPACEMENT_X, numero_de_ligne * ESPACEMENT_Y
+# hauteur totale d'une table ( 1 nom de table + n lignes)
+def hauteur_table(table: Table) -> int:
+    return HAUTEUR_TITRE + HAUTEUR_LIGNE * max(1, len(table.colonnes))
 
 
 # position (x, y) d'une table dans le graphe
@@ -221,9 +221,42 @@ def calcul_position_tables_sans_chevauchement(model: Modele) -> dict[str, tuple[
     return positions
 
 
-# hauteur totale d'une table ( 1 nom de table + n lignes)
-def hauteur_table(table: Table) -> int:
-    return HAUTEUR_TITRE + HAUTEUR_LIGNE * max(1, len(table.colonnes))
+
+# position (x, y) d'une table dans le graphe, calculée à partir des relations FK (networkx)
+def calcul_position_tables_networkx(model: Modele) -> dict[str, tuple[int, int]]:
+    """Dispose les tables en s'appuyant sur un algorithme de layout de graphe (spring layout) :
+    les tables reliées par une FK sont rapprochées, ce qui limite les croisements d'arêtes.
+
+    ATTENTION : les tables peuvent encore se chevaucher, networx considérant les tables comme des points et ne tenant
+    pas compte de leur taille (on pourra cependant ajuster le paramètre k et l'échelle finale).
+    """
+    graphe = nx.Graph()
+    graphe.add_nodes_from(table.nom for table in model.tables)
+    graphe.add_edges_from((rel.table_source, rel.table_destination) for rel in model.relations)
+
+    nb_tables = len(model.tables)
+
+    # k = distance "naturelle" cible entre deux nœuds pour spring_layout ; on la relie à la taille
+    # réelle des tables pour que les nœuds non reliés ne soient pas artificiellement tassés
+    k = (LARGEUR_TABLE + ESPACEMENT_X) / max(1, math.sqrt(nb_tables))
+    # seed fixe pour une disposition reproductible d'un lancement à l'autre
+    positions_normalisees = nx.spring_layout(graphe, k=k, seed=0)
+
+    # spring_layout renvoie des coordonnées normalisées (~[-1, 1]) : on les remet à l'échelle
+    # de la grille en pixels, en tenant compte de la hauteur max des tables pour l'axe vertical
+    hauteur_max = max((hauteur_table(table) for table in model.tables), default=HAUTEUR_TITRE)
+    echelle_x = (LARGEUR_TABLE + ESPACEMENT_X) * math.sqrt(nb_tables)
+    echelle_y = (hauteur_max + ESPACEMENT_Y) * math.sqrt(nb_tables)
+
+    positions: dict[str, tuple[int, int]] = {}
+    for table in model.tables:
+        x_normalise, y_normalise = positions_normalisees[table.nom]
+        # l'axe y de networkx pointe vers le haut, celui de drawio/graphml vers le bas -> on l'inverse
+        x = round((x_normalise + 1) / 2 * echelle_x)
+        y = round((1 - y_normalise) / 2 * echelle_y)
+        positions[table.nom] = (x, y)
+
+    return positions
 
 
 # parcours des colonnes pour produire l'étiquette lisible de chaque champ
@@ -526,13 +559,13 @@ position_table : dict[str, tuple[int, int]] = {}
 def main() -> None:
     global position_table
 
-    input_path = Path("./input") / "MySQL.4.sql"
+    # input_path = Path("./input") / "MySQL.4.sql"
     # input_path = Path("./input") / "PostgreSQL.34.sql"
     # input_path = Path("./input") / "SQLite.145.sql"
     # input_path = Path("./input") / "MSSQL.53.sql"
     # input_path = Path("./input") / "MSSQL.test.sql"
     # input_path = Path("./input") / "MSSQL.test.GO.sql"
-    # input_path = Path("./input") / "MSSQL.188.sql"  # Le caractère ‑ est un tiret cadratin/insécable (U+2011),U pas un tiret ASCII - : source d'erreurs silencieuses si quelqu'un retape le nom du fichier à la main.
+    input_path = Path("./input") / "MSSQL.188.sql"  # Le caractère ‑ est un tiret cadratin/insécable (U+2011),U pas un tiret ASCII - : source d'erreurs silencieuses si quelqu'un retape le nom du fichier à la main.
     # stem = ddl_path.stem if ddl_path.stem else "MySQL"
     output_dir = Path("./output")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -555,7 +588,9 @@ def main() -> None:
     print(f"{len(model.relations)} relations FK détectées.")
 
     # positionnment (x,y) des tables à l'avance car commun à tous les graphes
-    position_table = calcul_position_tables(model)
+    # position_table = calcul_position_tables(model)
+    # position_table = calcul_position_tables_sans_chevauchement(model)
+    position_table = calcul_position_tables_networkx(model)
 
     # génération du diagramme graphml à partir du même modèle
     generer_graphml_ET(model, graphml_path)
