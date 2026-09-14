@@ -16,6 +16,8 @@ from pydantic import BaseModel, Field
 import drawpyo
 from simple_ddl_parser import DDLParser  # nom du package (simple_ddl_parser) <> nom du projet (simple-ddl-parser) cf https://pypi.org/project/simple-ddl-parser/
 import networkx as nx # nécessite "pip install numpy"
+# from scipy import kamada_kawai_layout
+
 # from networkx.drawing.nx_agraph import graphviz_layout # pour gérer l'anti-collision des noeuds du graphe
 
 """ _______________________________________________________________________________________________________________
@@ -222,7 +224,7 @@ def calcul_position_tables_sans_chevauchement(model: Modele) -> dict[str, tuple[
 
 
 
-# position (x, y) d'une table dans le graphe, calculée à partir des relations FK (networkx)
+# position (x, y) des tables dans le graphe en fonction de leurs relations FK (networkx)
 def calcul_position_tables_networkx(model: Modele) -> dict[str, tuple[int, int]]:
     """Dispose les tables en s'appuyant sur un algorithme de layout de graphe (spring layout) :
     les tables reliées par une FK sont rapprochées, ce qui limite les croisements d'arêtes.
@@ -238,10 +240,16 @@ def calcul_position_tables_networkx(model: Modele) -> dict[str, tuple[int, int]]
 
     # k = distance "naturelle" cible entre deux nœuds pour spring_layout ; on la relie à la taille
     # réelle des tables pour que les nœuds non reliés ne soient pas artificiellement tassés
-    k = (LARGEUR_TABLE + ESPACEMENT_X) / max(1, math.sqrt(nb_tables))
-    # seed fixe pour une disposition reproductible d'un lancement à l'autre
-    positions_normalisees = nx.spring_layout(graphe, k=k, seed=0)
-
+    k = 8.0 / max(1, math.sqrt(nb_tables))
+    positions_normalisees = nx.spring_layout(graphe,
+                                             k=k,             # distance idéale entre nœuds
+                                             iterations=200,  # plus d'itérations = meilleure convergence
+                                             scale=0.8,       # échelle finale du layout (homothétie)
+                                             seed=42,         # pour reproductibilité
+                                             threshold=1e-4,  # seuil de convergence : arrête l’algorithme si le déplacement relatif moyen des nœuds entre deux itérations est inférieur à ce seuil.(défaut 1e-4, peut baisser)
+                                             dim=2            # tester la 3D ! :)
+                                             )
+    # positions_normalisees = nx.kamada_kawai_layout(graphe)
     # spring_layout renvoie des coordonnées normalisées (~[-1, 1]) : on les remet à l'échelle
     # de la grille en pixels, en tenant compte de la hauteur max des tables pour l'axe vertical
     hauteur_max = max((hauteur_table(table) for table in model.tables), default=HAUTEUR_TITRE)
@@ -562,10 +570,10 @@ def main() -> None:
     # input_path = Path("./input") / "MySQL.4.sql"
     # input_path = Path("./input") / "PostgreSQL.34.sql"
     # input_path = Path("./input") / "SQLite.145.sql"
-    # input_path = Path("./input") / "MSSQL.53.sql"
+    input_path = Path("./input") / "MSSQL.53.sql"
     # input_path = Path("./input") / "MSSQL.test.sql"
     # input_path = Path("./input") / "MSSQL.test.GO.sql"
-    input_path = Path("./input") / "MSSQL.188.sql"  # Le caractère ‑ est un tiret cadratin/insécable (U+2011),U pas un tiret ASCII - : source d'erreurs silencieuses si quelqu'un retape le nom du fichier à la main.
+    # input_path = Path("./input") / "MSSQL.188.sql"  # Le caractère ‑ est un tiret cadratin/insécable (U+2011),U pas un tiret ASCII - : source d'erreurs silencieuses si quelqu'un retape le nom du fichier à la main.
     # stem = ddl_path.stem if ddl_path.stem else "MySQL"
     output_dir = Path("./output")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -587,18 +595,24 @@ def main() -> None:
         print(f"  - {t.nom} : {len(t.colonnes)} colonnes, PK={pk}, FK={fk}")
     print(f"{len(model.relations)} relations FK détectées.")
 
-    # positionnment (x,y) des tables à l'avance car commun à tous les graphes
+    """ 
+        positionnment (x,y) des tables à l'avance car commun à tous les graphes
+    """
     # position_table = calcul_position_tables(model)
     # position_table = calcul_position_tables_sans_chevauchement(model)
     position_table = calcul_position_tables_networkx(model)
 
-    # génération du diagramme graphml à partir du même modèle
+    """ 
+        génération du diagramme graphml
+    """
     generer_graphml_ET(model, graphml_path)
     print(f"Fichier graphml généré : {graphml_path}")
     # print(model.model_dump_json(indent=2))
 
 
-    # génération du diagramme drawio à partir du modèle
+    """ 
+        génération du diagramme drawio
+    """
     # generer_drawio_drawpyo(model, drawio_path)
     generer_drawio_ET(model, drawio_path)
     print(f"Fichier drawio généré : {drawio_path}")
