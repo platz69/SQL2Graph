@@ -47,6 +47,7 @@ class Colonne(BaseModel):
     type: str
     nullable: bool = True # = True fixe la valeur par défaut
     is_pk: bool = False
+    is_unique: bool = False
     fk: CleEtrangere | None = None
 
 
@@ -106,7 +107,7 @@ def conversion_ddl_en_objets(ddl_texte: str) -> Modele:
     # parcours des tables du résultat de simple-ddl-parser
     for raw_table in parsed:
         if "columns" not in raw_table:
-            print("Ce n'est pas un CREATE TABLE (index, alter isolé, etc.)")
+            print(f"L'instruction contenant {raw_table} n'est pas un CREATE TABLE")
             continue
 
         nom_table = raw_table["table_name"]
@@ -121,6 +122,14 @@ def conversion_ddl_en_objets(ddl_texte: str) -> Modele:
             raise ValueError(f"alter est None pour la table {nom_table}")  # sinon ça fait un warning
         for pk_decl in alter.get("primary_keys", []):
             pk_colonnes.update(pk_decl.get("columns", []))
+
+        # idem pour les contraintes UNIQUE : elles peuvent être déclarées inline (col["unique"])
+        # ou ajoutées via ALTER TABLE ... ADD CONSTRAINT ... UNIQUE (alter["uniques"])
+        unique_colonnes = {
+            raw_col["name"] for raw_col in raw_table["columns"] if raw_col.get("unique")
+        }
+        for unique_decl in alter.get("uniques", []):
+            unique_colonnes.update(unique_decl.get("columns", []))
 
         # idem pour les FK : quand elles sont ajoutées via ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY,
         # simple-ddl-parser les restitue dans alter["columns"] (une entrée par colonne source avec "references")
@@ -161,6 +170,7 @@ def conversion_ddl_en_objets(ddl_texte: str) -> Modele:
                     type=conversion_type_colonne_en_str(raw_col),
                     nullable=raw_col.get("nullable", True),
                     is_pk=nom_colonne in pk_colonnes,
+                    is_unique=nom_colonne in unique_colonnes,
                     fk=fk,
                 )
             )
@@ -171,7 +181,48 @@ def conversion_ddl_en_objets(ddl_texte: str) -> Modele:
 
 
 """ _____________________________________________________________________________________________________
-        Conversion Objet -> .drawio + .graphml
+        Analyse du modèle -> affichage des cardinalités
+_________________________________________________________________________________________________________
+"""
+
+def calcul_cardinalite(colonne_fk: Colonne) -> str:
+    """
+    Détermine la cardinalité côté A (table référencée) et côté B (table contenant la FK)
+    en fonction des options NOT NULL / UNIQUE de la colonne portant la clé étrangère.
+    """
+    not_null = not colonne_fk.nullable
+    unique   = colonne_fk.is_unique
+
+    if unique and not_null:
+        return "1..1 ------------------- 0..1"
+    if unique:
+        return "0..1 ------------------- 0..1"
+    if not_null:
+        return "1..1 ------------------- 0..n"
+    return "0..1 ------------------- 0..n"
+
+
+def afficher_cardinalites(modele: Modele) -> None:
+    """
+    Parcourt toutes les relations (FK) du modèle et affiche la cardinalité
+    "A <card_A> ------------------- <card_B> B" pour chacune d'entre elles,
+    où A est la table référencée (ref_table) et B la table portant la clé étrangère.
+    """
+    for rel in modele.relations:
+        table_b = modele.get_table(rel.table_source)
+        if table_b is None:
+            continue
+
+        colonne_fk = next((c for c in table_b.colonnes if c.nom == rel.colonne_source), None)
+        if colonne_fk is None:
+            continue
+
+        cardinalite = calcul_cardinalite(colonne_fk)
+        print(f"{rel.table_destination.ljust(30)} {cardinalite} {rel.table_source}")
+
+
+""" _____________________________________________________________________________________________________
+        Conversion Objet -> drawio ou Yed
 _________________________________________________________________________________________________________
 """
 
@@ -259,7 +310,7 @@ def calcul_position_tables_networkx(model: Modele) -> dict[str, tuple[int, int]]
     positions: dict[str, tuple[int, int]] = {}
     for table in model.tables:
         x_normalise, y_normalise = positions_normalisees[table.nom]
-        # l'axe y de networkx pointe vers le haut, celui de drawio/graphml vers le bas -> on l'inverse
+        # l'axe y de networkx pointe vers le haut, celui de drawio/Yed vers le bas -> on l'inverse
         x = round((x_normalise + 1) / 2 * echelle_x)
         y = round((1 - y_normalise) / 2 * echelle_y)
         positions[table.nom] = (x, y)
@@ -287,14 +338,14 @@ def ET_node_to_clean_str(table_nom: str) -> str:
     return "n_" + ''.join(caractere if caractere.isalnum() else '_' for caractere in table_nom).strip('_')
 
 
-# parcours des tables pour écrire le fichier GraphML de sortie
-def generer_graphml_ET(model: Modele, chemin_de_sortie: Path) -> None:
-    """Génère un fichier GraphML exploitable par yEd."""
+# parcours des tables pour écrire le fichier Yed de sortie
+def generer_MPD_Yed_ET(model: Modele, chemin_de_sortie: Path, diag_type: str) -> None:
+    """Génère un fichier GraphML exploitable par Yed."""
     chemin_de_sortie.parent.mkdir(parents=True, exist_ok=True)
 
-    # --- 1. structure racine du document GraphML ---
+    # --- 1. structure racine du document Yed ---
 
-    """ ----------en-tête à graphml construire------------------
+    """ ----------en-tête graphml à construire------------------
         <?xml version='1.0' encoding='utf-8'?>
             <graphml xmlns="http://graphml.graphdrawing.org/xmlns" xmlns:y="http://www.yworks.com/xml/graphml" version="3.0">
                 <key id="d0" for="node" yfiles.type="nodegraphics"/>
@@ -359,7 +410,10 @@ def generer_graphml_ET(model: Modele, chemin_de_sortie: Path) -> None:
         data = ET.SubElement(edge, "{http://graphml.graphdrawing.org/xmlns}data", {"key": "d1"})
         poly = ET.SubElement(data, "{http://www.yworks.com/xml/graphml}PolyLineEdge")
         ET.SubElement(poly, "{http://www.yworks.com/xml/graphml}LineStyle", {"color": "#000000", "type": "line", "width": "1.0"})
-        ET.SubElement(poly, "{http://www.yworks.com/xml/graphml}Arrows", {"source": "none", "target": "standard"})
+        if diag_type == 'mcd':
+            ET.SubElement(poly, "{http://www.yworks.com/xml/graphml}Arrows", {"source": "crows_foot_many", "target": "none"})
+        else:
+            ET.SubElement(poly, "{http://www.yworks.com/xml/graphml}Arrows", {"source": "none", "target": "standard"})
         label = ET.SubElement(poly, "{http://www.yworks.com/xml/graphml}EdgeLabel",
                               {"alignment": "center", "backgroundColor": "#ffffff", "fontFamily": "Dialog", "fontSize": "11"})
         label.text = rel.colonne_source
@@ -370,9 +424,9 @@ def generer_graphml_ET(model: Modele, chemin_de_sortie: Path) -> None:
     tree.write(chemin_de_sortie, encoding="utf-8", xml_declaration=True)
 
 
-# parcours du modèle pour générer le diagramme Draw.io final, en ElementTree pur (sans drawpyo)
-def generer_drawio_ET(model: Modele, chemin_de_sortie: Path) -> None:
-    """Génère un fichier .drawio exploitable par draw.io / diagrams.net, en ElementTree pur (sans drawpyo)."""
+# parcours du modèle pour générer le diagramme MPD drawio final, en ElementTree pur (sans drawpyo)
+def generer_MPD_drawio_ET(model: Modele, chemin_de_sortie: Path) -> None:
+    """Génère un fichier .drawio exploitable par drawio / diagrams.net, en ElementTree pur (sans drawpyo)."""
     chemin_de_sortie.parent.mkdir(parents=True, exist_ok=True)
 
     # --- 1. structure racine du document drawio ---
@@ -462,8 +516,8 @@ def generer_drawio_ET(model: Modele, chemin_de_sortie: Path) -> None:
 
 
 
-# parcours du modèle pour générer le diagramme Draw.io final
-def generer_drawio_drawpyo(model: Modele, chemin_de_sortie: Path) -> None:
+# parcours du modèle pour générer le diagramme MPD drawio final
+def generer_MPD_drawio_drawpyo(model: Modele, chemin_de_sortie: Path) -> None:
     file = drawpyo.File()
     file.file_path = str(chemin_de_sortie.parent)
     file.file_name = chemin_de_sortie.name
@@ -556,33 +610,53 @@ def generer_drawio_drawpyo(model: Modele, chemin_de_sortie: Path) -> None:
     xml_tree.write(chemin_de_sortie, encoding="utf-8", xml_declaration=True)
 
 
-""" _____________________________________________________________________________________________________
-        main()
-_________________________________________________________________________________________________________
-"""
+# # Charge un fichier Yed et adapte le style des flèches pour un MCD.
+# def yed_to_MCD(fichier: str):
+#
+#     tree = ET.parse(fichier)
+#     root = tree.getroot()
+#
+#     # parcours des flèches et remplacement des extrémités
+#     for element in root.iter():
+#         if element.tag.rsplit("}", 1)[-1] != "Arrows":
+#             continue
+#
+#         attrs = element.attrib
+#         if attrs.get("source") == "none":
+#             attrs["source"] = "crows_foot_many"
+#         if attrs.get("target") == "standard":
+#             attrs["target"] = "none"
+#
+#     ET.register_namespace("", "http://graphml.graphdrawing.org/xmlns")
+#     ET.register_namespace("x", "http://www.yworks.com/xml/graphml")
+#     ET.register_namespace("y", "http://www.yworks.com/xml/graphml")
+#     ET.indent(tree, space="  ")
+#     tree.write(fichier+'MCD.graphml', encoding="utf-8", xml_declaration=True)
+
 
 position_table : dict[str, tuple[int, int]] = {}
 
-# parcours du fichier SQL d'entrée pour générer le diagramme et le graphml
+# parcours du fichier SQL d'entrée pour générer les MPD/MCD drawio/Yed
 def main() -> None:
     global position_table
 
-    # input_path = Path("./input") / "MySQL.4.sql"
-    # input_path = Path("./input") / "PostgreSQL.34.sql"
-    # input_path = Path("./input") / "SQLite.145.sql"
-    input_path = Path("./input") / "MSSQL.53.sql"
-    # input_path = Path("./input") / "MSSQL.test.sql"
-    # input_path = Path("./input") / "MSSQL.test.GO.sql"
-    # input_path = Path("./input") / "MSSQL.188.sql"  # Le caractère ‑ est un tiret cadratin/insécable (U+2011),U pas un tiret ASCII - : source d'erreurs silencieuses si quelqu'un retape le nom du fichier à la main.
-    # stem = ddl_path.stem if ddl_path.stem else "MySQL"
+    input_dir  = Path("./input")
     output_dir = Path("./output")
+
     output_dir.mkdir(parents=True, exist_ok=True)
-    input_stem = input_path.stem
-    drawio_path  = output_dir / f"{input_stem}.drawio"
-    graphml_path = output_dir / f"{input_stem}.graphml"
+
+    # input_file = input_dir / "MySQL.3.sql"
+    # input_file = input_dir / "PostgreSQL.34.sql"
+    input_file = input_dir / "SQLite.145.sql"
+    # input_file = input_dir / "MSSQL.53.sql"
+    # input_file = input_dir / "MSSQL.53.WITH CHECK.sql"
+    # input_file = input_dir / "MSSQL.test.sql"
+    # input_file = input_dir / "MSSQL.test.GO.sql"
+    # input_file = input_dir / "MSSQL.188.sql"  # Le caractère ‑ est un tiret cadratin/insécable (U+2011),U pas un tiret ASCII - : source d'erreurs silencieuses si quelqu'un retape le nom du fichier à la main.
 
     # lecture du fichier sql en entrée
-    ddl_text = input_path.read_text(encoding="utf-8")
+    ddl_text = input_file.read_text(encoding="utf-8")
+    ddl_text = ddl_text.replace(' WITH CHECK', '')  # au 15/09/2026, simple_ddl_parser ne gère pas les lignes contenant cette expression, ce qui fait perdre des clés étrangères
 
     # fabrication du modèle pydantic à partir du contenu du fichier sql en entrée
     model = conversion_ddl_en_objets(ddl_text)
@@ -594,6 +668,13 @@ def main() -> None:
         fk = [c.nom for c in t.colonnes if c.fk]
         print(f"  - {t.nom} : {len(t.colonnes)} colonnes, PK={pk}, FK={fk}")
     print(f"{len(model.relations)} relations FK détectées.")
+    if model.relations:
+        print("FK détectées :")
+        for rel in model.relations:
+            print(f"  - {rel.table_source}.{rel.colonne_source} -> {rel.table_destination}.{rel.colonne_destination}")
+
+    print("\nCardinalités détectées :")
+    afficher_cardinalites(model)
 
     """ 
         positionnment (x,y) des tables à l'avance car commun à tous les graphes
@@ -603,19 +684,20 @@ def main() -> None:
     position_table = calcul_position_tables_networkx(model)
 
     """ 
-        génération du diagramme graphml
+        génération du diagramme MPD Yed
     """
-    generer_graphml_ET(model, graphml_path)
-    print(f"Fichier graphml généré : {graphml_path}")
+    yed_file = output_dir / f"{input_file.stem}.graphml"
+    generer_MPD_Yed_ET(model, yed_file, 'mcd')
+    print(f"Fichier Yed généré : {yed_file}")
     # print(model.model_dump_json(indent=2))
 
-
     """ 
-        génération du diagramme drawio
+        génération du MPD drawio
     """
-    # generer_drawio_drawpyo(model, drawio_path)
-    generer_drawio_ET(model, drawio_path)
-    print(f"Fichier drawio généré : {drawio_path}")
+    # generer_MPD_drawio_drawpyo(model, drawio_file)
+    drawio_file  = output_dir / f"{input_file.stem}.drawio"
+    generer_MPD_drawio_ET(model, drawio_file)
+    print(f"Fichier drawio généré : {drawio_file}")
 
 
 # si le script est exécuté directement, on lance le traitement principal

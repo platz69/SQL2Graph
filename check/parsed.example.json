@@ -1,0 +1,71 @@
+{
+    "alter": {
+    },
+    "checks": [
+    ],
+    "columns": [
+        {
+            "check": null,
+            "default": null,
+            "name": "ID_BENEFICIAIRE_DEMANDE",
+            "nullable": false,
+            "references": null,
+            "size": null,
+            "type": "INTEGER",
+            "unique": false
+        },
+        {
+            "check": null,
+            "default": null,
+            "name": "ID_DEMANDE",
+            "nullable": false,
+            "references": {
+                "column": "ID_DEMANDE",
+                "deferrable_initially": null,
+                "on_delete": null,
+                "on_update": null,
+                "schema": null,
+                "table": "DEMANDE"
+            },
+            "size": null,
+            "type": "INTEGER",
+            "unique": false
+        },
+        {
+            "check": null,
+            "default": null,
+            "name": "ID_BENEFICIAIRE",
+            "nullable": false,
+            "references": {
+                "column": "ID_BENEFICIAIRE",
+                "deferrable_initially": null,
+                "on_delete": null,
+                "on_update": null,
+                "schema": null,
+                "table": "BENEFICIAIRE"
+            },
+            "size": null,
+            "type": "INTEGER",
+            "unique": false
+        },
+        {
+            "check": null,
+            "default": null,
+            "name": "NOMBRE_EXEMPLAIRE",
+            "nullable": true,
+            "references": null,
+            "size": null,
+            "type": "INTEGER",
+            "unique": false
+        }
+    ],
+    "index": [
+    ],
+    "partitioned_by": [
+    ],
+    "primary_key": [
+    ],
+    "schema": null,
+    "table_name": "BENEFICIAIRE_DEMANDE",
+    "tablespace": null
+}
