@@ -1,0 +1,7 @@
+drawpyo==0.2.5
+networkx==3.6.1  # https://networkx.org/documentation/stable/reference/algorithms/index.html
+numpy==2.5.3
+pydantic==2.13.4
+simple-ddl-parser==1.13.0
+
+scipy # nécessaire pour nx.kamada_kawai_layout()

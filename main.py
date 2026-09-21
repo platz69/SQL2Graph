@@ -13,7 +13,7 @@ import xml.etree.ElementTree as ET
 
 # bibliothèques tierces
 from pydantic import BaseModel, Field
-import drawpyo
+# import drawpyo
 from simple_ddl_parser import DDLParser  # nom du package (simple_ddl_parser) <> nom du projet (simple-ddl-parser) cf https://pypi.org/project/simple-ddl-parser/
 import networkx as nx # nécessite "pip install numpy"
 # from scipy import kamada_kawai_layout
@@ -401,7 +401,8 @@ def generer_MPD_Yed_ET(model: Modele, chemin_de_sortie: Path, diag_type: str) ->
     for rel in model.relations:
         # si la table source ou la table cible n'existe pas, on ignore la relation incomplète
         if rel.table_source not in noms_tables or rel.table_destination not in noms_tables:
-            continue
+            print(red+f"au moins l'une des tables {rel.table_source} ou {rel.table_destination} n'existe pas"+reset)
+            break
         compteur_cles_etrangeres[rel.table_source] = compteur_cles_etrangeres.get(rel.table_source, 0) + 1
         edge_id = f"{rel.table_source}.cle_etrangere_{compteur_cles_etrangeres[rel.table_source]}"
 
@@ -410,10 +411,12 @@ def generer_MPD_Yed_ET(model: Modele, chemin_de_sortie: Path, diag_type: str) ->
         data = ET.SubElement(edge, "{http://graphml.graphdrawing.org/xmlns}data", {"key": "d1"})
         poly = ET.SubElement(data, "{http://www.yworks.com/xml/graphml}PolyLineEdge")
         ET.SubElement(poly, "{http://www.yworks.com/xml/graphml}LineStyle", {"color": "#000000", "type": "line", "width": "1.0"})
-        if diag_type == 'mcd':
+        if diag_type == 'mpd':
+            ET.SubElement(poly, "{http://www.yworks.com/xml/graphml}Arrows", {"source": "none", "target": "standard"})
+        elif diag_type == 'mcd':
             ET.SubElement(poly, "{http://www.yworks.com/xml/graphml}Arrows", {"source": "crows_foot_many", "target": "none"})
         else:
-            ET.SubElement(poly, "{http://www.yworks.com/xml/graphml}Arrows", {"source": "none", "target": "standard"})
+            print(red + f"le type de diagramme {diag_type} est inconnu" + reset)
         label = ET.SubElement(poly, "{http://www.yworks.com/xml/graphml}EdgeLabel",
                               {"alignment": "center", "backgroundColor": "#ffffff", "fontFamily": "Dialog", "fontSize": "11"})
         label.text = rel.colonne_source
@@ -425,7 +428,7 @@ def generer_MPD_Yed_ET(model: Modele, chemin_de_sortie: Path, diag_type: str) ->
 
 
 # parcours du modèle pour générer le diagramme MPD drawio final, en ElementTree pur (sans drawpyo)
-def generer_MPD_drawio_ET(model: Modele, chemin_de_sortie: Path) -> None:
+def generer_MPD_drawio_ET(model: Modele, chemin_de_sortie: Path, diag_type: str) -> None:
     """Génère un fichier .drawio exploitable par drawio / diagrams.net, en ElementTree pur (sans drawpyo)."""
     chemin_de_sortie.parent.mkdir(parents=True, exist_ok=True)
 
@@ -489,19 +492,51 @@ def generer_MPD_drawio_ET(model: Modele, chemin_de_sortie: Path) -> None:
 
     # --- 4. création d'une arête par relation FK, en ignorant les relations incomplètes ---
     noms_colonnes = {f"{table.nom}.{col.nom}" for table in model.tables for col in table.colonnes}
+
+    # compteur qui sert à réjouter un suffixe et éviter les ids en doublon
     compteur_cles_etrangeres: dict[str, int] = {}
+
+    # ---- boucle sur les relations
     for rel in model.relations:
         source_id      = f"{rel.table_source}.{rel.colonne_source}"
         destination_id = f"{rel.table_destination}.{rel.colonne_destination}"
         # si la colonne source ou la colonne cible n'existe pas, on ignore la relation incomplète
         if source_id not in noms_colonnes or destination_id not in noms_colonnes:
             continue
-        compteur_cles_etrangeres[rel.table_source] = compteur_cles_etrangeres.get(rel.table_source, 0) + 1
-        edge_id = f"{rel.table_source}.cle_etrangere_{compteur_cles_etrangeres[rel.table_source]}"
 
-        edge_cell = ET.SubElement(root, "mxCell", {
+        # ---- 2ème boucle : recherche de la table puis de la colonne source concernée par la relation
+        # pour identifier les propriétés nullable et unique éventuelles
+        table_source = next((table for table in model.tables if table.nom == rel.table_source), None)
+        fk_col       = next((col for col in (table_source.colonnes if table_source else []) if col.nom == rel.colonne_source), None)
+
+        if fk_col is None:
+            continue
+
+        nullable = fk_col.nullable
+        unique   = fk_col.is_unique
+
+        # valeurs par défaut qui permet de détecter visuellement des extrémités de flèches qui n'auraient pas été traitées dans les tests qui suivent
+        start_arrow = 'ERmany'
+        end_arrow   = 'ERone'
+
+        if nullable :
+            end_arrow  ='ERzeroToOne'
+        elif not nullable:
+            end_arrow  ='ERmandOne'
+
+        if unique:
+            start_arrow = 'ERzeroToOne'
+        elif not unique:
+            start_arrow = 'ERzeroToMany'
+
+        # incrémentation du compteur de FK
+        compteur_cles_etrangeres[rel.table_source] = compteur_cles_etrangeres.get(rel.table_source, 0) + 1
+
+        edge_id    = f'{rel.table_source}.cle_etrangere_{compteur_cles_etrangeres[rel.table_source]}'
+        edge_style = f"edgeStyle=entityRelationEdgeStyle;elbow=vertical;rounded=0;jettySize=auto;startArrow={start_arrow};endArrow={end_arrow};"
+        edge_cell  = ET.SubElement(root, "mxCell", {
             "id": edge_id,
-            "style": "edgeStyle=entityRelationEdgeStyle;elbow=vertical;rounded=0;jettySize=auto;startArrow=ERmany;endArrow=ERone;",
+            "style": edge_style,
             "edge": "1",
             "parent": "1",
             "source": source_id,
@@ -515,99 +550,98 @@ def generer_MPD_drawio_ET(model: Modele, chemin_de_sortie: Path) -> None:
     tree.write(chemin_de_sortie, encoding="utf-8", xml_declaration=False)
 
 
-
-# parcours du modèle pour générer le diagramme MPD drawio final
-def generer_MPD_drawio_drawpyo(model: Modele, chemin_de_sortie: Path) -> None:
-    file = drawpyo.File()
-    file.file_path = str(chemin_de_sortie.parent)
-    file.file_name = chemin_de_sortie.name
-
-    # --- 1. structure racine du document drawio ---
-
-    page = drawpyo.Page(file=file)
-
-    # retirer l'aperçu de la grille
-    page.grid = 0
-
-    # table_nom -> objet drawpyo "conteneur"
-    table_objects: dict[str, "drawpyo.diagram.Object"] = {}
-    # (table_nom, column_nom) -> objet drawpyo "ligne", utile pour les arêtes FK
-    row_objects: dict[tuple[str, str], "drawpyo.diagram.Object"] = {}
-
-    # --- 2. calcul de la disposition des tables en grille +/- carrée ---
-    # factorisé et appel& dans main()
-    # nb_tables = len(model.tables)
-    # nb_cols_par_ligne = calc_nb_cols_par_ligne(nb_tables)
-
-    # --- 3. création d'un nœud par table, avec ses colonnes en libellé ---
-    for i, table in enumerate(model.tables):
-        # x, y = calcul_position_tables_unique(i, nb_cols_par_ligne)
-
-        # création du conteneur de table (nom de la table)
-        header = drawpyo.diagram.Object(
-            page=page,
-            id=table.nom,
-            value=table.nom.upper(),
-            position=(position_table[table.nom][0], position_table[table.nom][1])
-        )
-        header.width = LARGEUR_TABLE
-        header.height = hauteur_table(table)
-        header.apply_style_string(
-            "whiteSpace=wrap;rounded=0;dashed=0;align=center;verticalAlign=top;"
-        )
-        table_objects[table.nom] = header
-
-        # parcours des colonnes pour créer les lignes de champs de la table
-        for j, col in enumerate(table.colonnes):
-            row = drawpyo.diagram.Object(
-                page=page,
-                id=f"{table.nom}.{col.nom}",
-                value=calcul_label_colonne(col),
-                parent=header,
-                position_rel_to_parent=(0, HAUTEUR_TITRE + j * HAUTEUR_LIGNE),
-            )
-            row.width = LARGEUR_TABLE
-            row.height = HAUTEUR_LIGNE
-            row.apply_style_string(
-                "whiteSpace=wrap;rounded=0;dashed=0;align=left;verticalAlign=middle;spacingLeft=8;"
-            )
-            row_objects[(table.nom, col.nom)] = row
-
-    # --- 4. création d'une arête par relation FK, en ignorant les relations incomplètes ---
-    compteur_cles_etrangeres: dict[str, int] = {}
-    for rel in model.relations:
-        source      = row_objects.get((rel.table_source, rel.colonne_source))
-        destination = row_objects.get((rel.table_destination, rel.colonne_destination))
-        # si l'origine ou la cible n'existe pas, on ignore la relation incomplète
-        if source is None or destination is None:
-            # La table référencée n'est pas définie dans le fichier -> on ignore l'arête
-            continue
-
-        compteur_cles_etrangeres[rel.table_source] = compteur_cles_etrangeres.get(rel.table_source, 0) + 1
-        edge_id = f"{rel.table_source}.cle_etrangere_{compteur_cles_etrangeres[rel.table_source]}"
-
-        edge = drawpyo.diagram.Edge(page=page, id=edge_id, source=source, target=destination)
-        edge.waypoints       = "entity_relation"
-        edge.line_end_target = "ERone"
-        edge.line_end_source = "ERmany"
-        edge.endFill_target  = False
-        edge.endFill_source  = False
-
-    # conversion en ElementTree (nécessaire pour l'indentation)
-    xml_root = ET.fromstring(file.xml)
-    # désactive l'aperçu de la page
-    # xml_root.find(".//mxGraphModel").set("page", "0")  # cette ligne seule déclenche un warning donc on coupe en 2
-    mx_graph_model = xml_root.find(".//mxGraphModel")
-    if mx_graph_model is None:
-        raise ValueError("Balise <mxGraphModel> introuvable dans le XML généré par drawpyo")
-    mx_graph_model.set("page", "0")
-    # indentation
-    xml_tree = ET.ElementTree(xml_root)
-    ET.indent(xml_tree, space="  ")
-
-    # --- 5. écriture du fichier drawio final sur disque ---
-    chemin_de_sortie.parent.mkdir(parents=True, exist_ok=True)
-    xml_tree.write(chemin_de_sortie, encoding="utf-8", xml_declaration=True)
+# # parcours du modèle pour générer le diagramme MPD drawio final
+# def generer_MPD_drawio_drawpyo(model: Modele, chemin_de_sortie: Path, diag_type: str) -> None:
+#     file = drawpyo.File()
+#     file.file_path = str(chemin_de_sortie.parent)
+#     file.file_name = chemin_de_sortie.name
+#
+#     # --- 1. structure racine du document drawio ---
+#
+#     page = drawpyo.Page(file=file)
+#
+#     # retirer l'aperçu de la grille
+#     page.grid = 0
+#
+#     # table_nom -> objet drawpyo "conteneur"
+#     table_objects: dict[str, "drawpyo.diagram.Object"] = {}
+#     # (table_nom, column_nom) -> objet drawpyo "ligne", utile pour les arêtes FK
+#     row_objects: dict[tuple[str, str], "drawpyo.diagram.Object"] = {}
+#
+#     # --- 2. calcul de la disposition des tables en grille +/- carrée ---
+#     # factorisé et appel& dans main()
+#     # nb_tables = len(model.tables)
+#     # nb_cols_par_ligne = calc_nb_cols_par_ligne(nb_tables)
+#
+#     # --- 3. création d'un nœud par table, avec ses colonnes en libellé ---
+#     for i, table in enumerate(model.tables):
+#         # x, y = calcul_position_tables_unique(i, nb_cols_par_ligne)
+#
+#         # création du conteneur de table (nom de la table)
+#         header = drawpyo.diagram.Object(
+#             page=page,
+#             id=table.nom,
+#             value=table.nom.upper(),
+#             position=(position_table[table.nom][0], position_table[table.nom][1])
+#         )
+#         header.width = LARGEUR_TABLE
+#         header.height = hauteur_table(table)
+#         header.apply_style_string(
+#             "whiteSpace=wrap;rounded=0;dashed=0;align=center;verticalAlign=top;"
+#         )
+#         table_objects[table.nom] = header
+#
+#         # parcours des colonnes pour créer les lignes de champs de la table
+#         for j, col in enumerate(table.colonnes):
+#             row = drawpyo.diagram.Object(
+#                 page=page,
+#                 id=f"{table.nom}.{col.nom}",
+#                 value=calcul_label_colonne(col),
+#                 parent=header,
+#                 position_rel_to_parent=(0, HAUTEUR_TITRE + j * HAUTEUR_LIGNE),
+#             )
+#             row.width = LARGEUR_TABLE
+#             row.height = HAUTEUR_LIGNE
+#             row.apply_style_string(
+#                 "whiteSpace=wrap;rounded=0;dashed=0;align=left;verticalAlign=middle;spacingLeft=8;"
+#             )
+#             row_objects[(table.nom, col.nom)] = row
+#
+#     # --- 4. création d'une arête par relation FK, en ignorant les relations incomplètes ---
+#     compteur_cles_etrangeres: dict[str, int] = {}
+#     for rel in model.relations:
+#         source      = row_objects.get((rel.table_source, rel.colonne_source))
+#         destination = row_objects.get((rel.table_destination, rel.colonne_destination))
+#         # si l'origine ou la cible n'existe pas, on ignore la relation incomplète
+#         if source is None or destination is None:
+#             # La table référencée n'est pas définie dans le fichier -> on ignore l'arête
+#             continue
+#
+#         compteur_cles_etrangeres[rel.table_source] = compteur_cles_etrangeres.get(rel.table_source, 0) + 1
+#         edge_id = f"{rel.table_source}.cle_etrangere_{compteur_cles_etrangeres[rel.table_source]}"
+#
+#         edge = drawpyo.diagram.Edge(page=page, id=edge_id, source=source, target=destination)
+#         edge.waypoints       = "entity_relation"
+#         edge.line_end_target = "ERone"
+#         edge.line_end_source = "ERmany"
+#         edge.endFill_target  = False
+#         edge.endFill_source  = False
+#
+#     # conversion en ElementTree (nécessaire pour l'indentation)
+#     xml_root = ET.fromstring(file.xml)
+#     # désactive l'aperçu de la page
+#     # xml_root.find(".//mxGraphModel").set("page", "0")  # cette ligne seule déclenche un warning donc on coupe en 2
+#     mx_graph_model = xml_root.find(".//mxGraphModel")
+#     if mx_graph_model is None:
+#         raise ValueError("Balise <mxGraphModel> introuvable dans le XML généré par drawpyo")
+#     mx_graph_model.set("page", "0")
+#     # indentation
+#     xml_tree = ET.ElementTree(xml_root)
+#     ET.indent(xml_tree, space="  ")
+#
+#     # --- 5. écriture du fichier drawio final sur disque ---
+#     chemin_de_sortie.parent.mkdir(parents=True, exist_ok=True)
+#     xml_tree.write(chemin_de_sortie, encoding="utf-8", xml_declaration=True)
 
 
 # # Charge un fichier Yed et adapte le style des flèches pour un MCD.
@@ -633,26 +667,47 @@ def generer_MPD_drawio_drawpyo(model: Modele, chemin_de_sortie: Path) -> None:
 #     ET.indent(tree, space="  ")
 #     tree.write(fichier+'MCD.graphml', encoding="utf-8", xml_declaration=True)
 
+""" constantes """
+# couleurs d'affichage dans la console
+blue, green, red = '\033[34m', '\033[32m', "\033[0;31m"
+reset = '\033[0m'
 
+"""" variables globales """
 position_table : dict[str, tuple[int, int]] = {}
 
 # parcours du fichier SQL d'entrée pour générer les MPD/MCD drawio/Yed
 def main() -> None:
-    global position_table
+    global position_table, blue, green, reset
 
     input_dir  = Path("./input")
     output_dir = Path("./output")
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # input_file = input_dir / "MySQL.3.sql"
-    # input_file = input_dir / "PostgreSQL.34.sql"
-    input_file = input_dir / "SQLite.145.sql"
-    # input_file = input_dir / "MSSQL.53.sql"
-    # input_file = input_dir / "MSSQL.53.WITH CHECK.sql"
-    # input_file = input_dir / "MSSQL.test.sql"
-    # input_file = input_dir / "MSSQL.test.GO.sql"
-    # input_file = input_dir / "MSSQL.188.sql"  # Le caractère ‑ est un tiret cadratin/insécable (U+2011),U pas un tiret ASCII - : source d'erreurs silencieuses si quelqu'un retape le nom du fichier à la main.
+    # --- tables pour tester toutes syntaxes PK/FK et cardinalités ----
+    # input_file = input_dir / "MSSQL.test.ChatGPT.sql"
+    # input_file = input_dir / "MySQL.test.ChatGPT.sql"
+    # input_file = input_dir / "PostgreSQL.test.ChatGPT.sql"
+    # input_file = input_dir / "SQLite.test.ChatGPT.sql" # absence des relations sur les tables HISTORIQUEPRODUIT et FACTURE
+    # input_file = input_dir / "MSSQL.test.Claude.sql"
+    # input_file = input_dir / "MySQL.test.Claude.sql"
+    # input_file = input_dir / "PostgreSQL.test.Claude.sql"
+    # input_file = input_dir / "SQLite.test.Claude.sql"
+    input_file = input_dir / "MSSQL.test.Perplexity.sql"
+    # input_file = input_dir / "MySQL.test.Perplexity.sql"
+    # input_file = input_dir / "PostgreSQL.test.Perplexity.sql"
+    # input_file = input_dir / "SQLite.test.Perplexity.sql"
+
+    # --- autres exemples ----
+    # input_file = input_dir / "old/MySQL.3.sql"
+    # input_file = input_dir / "old/MySQL.3.sql"
+    # input_file = input_dir / "old/PostgreSQL.34.sql"
+    # input_file = input_dir / "old/SQLite.145.sql"
+    # input_file = input_dir / "old/MSSQL.53.sql"
+    # input_file = input_dir / "old/MSSQL.53.WITH CHECK.sql"
+    # input_file = input_dir / "old/MSSQL.sans.GO.sql"
+    # input_file = input_dir / "old/MSSQL.GO.sql"
+    # input_file = input_dir / "old/MSSQL.188.sql"  # Le caractère ‑ est un tiret cadratin/insécable (U+2011),U pas un tiret ASCII - : source d'erreurs silencieuses si quelqu'un retape le nom du fichier à la main.
 
     # lecture du fichier sql en entrée
     ddl_text = input_file.read_text(encoding="utf-8")
@@ -667,14 +722,14 @@ def main() -> None:
         pk = [c.nom for c in t.colonnes if c.is_pk]
         fk = [c.nom for c in t.colonnes if c.fk]
         print(f"  - {t.nom} : {len(t.colonnes)} colonnes, PK={pk}, FK={fk}")
-    print(f"{len(model.relations)} relations FK détectées.")
+    print(f"{len(model.relations)} relations détectées (attention : plusieurs relations pour 1 FK composite).")
     if model.relations:
         print("FK détectées :")
         for rel in model.relations:
             print(f"  - {rel.table_source}.{rel.colonne_source} -> {rel.table_destination}.{rel.colonne_destination}")
 
-    print("\nCardinalités détectées :")
-    afficher_cardinalites(model)
+    # print("\nCardinalités détectées :")
+    # afficher_cardinalites(model)
 
     """ 
         positionnment (x,y) des tables à l'avance car commun à tous les graphes
@@ -687,7 +742,7 @@ def main() -> None:
         génération du diagramme MPD Yed
     """
     yed_file = output_dir / f"{input_file.stem}.graphml"
-    generer_MPD_Yed_ET(model, yed_file, 'mcd')
+    generer_MPD_Yed_ET(model, yed_file, 'mpd')
     print(f"Fichier Yed généré : {yed_file}")
     # print(model.model_dump_json(indent=2))
 
@@ -696,7 +751,7 @@ def main() -> None:
     """
     # generer_MPD_drawio_drawpyo(model, drawio_file)
     drawio_file  = output_dir / f"{input_file.stem}.drawio"
-    generer_MPD_drawio_ET(model, drawio_file)
+    generer_MPD_drawio_ET(model, drawio_file, 'mpd')
     print(f"Fichier drawio généré : {drawio_file}")
 
 
