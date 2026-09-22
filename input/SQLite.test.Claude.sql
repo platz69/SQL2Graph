@@ -1,28 +1,19 @@
 ﻿-- Présence dans ce script de :
---    PK simple		NULL     déclarée au niveau colonne > impossible (une PK ne peut être NULL)
---    PK simple	    NOT NULL déclarée au niveau colonne > oui
---    PK composite	NULL	 déclarée au niveau colonne > impossible (une PK/FK composite ne peut être déclarée au niveau colonne)
---    PK composite	NOT NULL déclarée au niveau colonne > impossible (une PK/FK composite ne peut être déclarée au niveau colonne)
---    PK simple		NULL     déclarée au niveau table   > impossible (une PK ne peut être NULL)
---    PK simple	    NOT NULL déclarée au niveau table   > oui
---    PK composite	NULL	 déclarée au niveau table   > impossible (une PK ne peut être NULL)
---    PK composite	NOT NULL déclarée au niveau table   > oui
---    PK simple		NULL     déclarée au niveau ALTER   > impossible (une PK ne peut être NULL)
---    PK simple	    NOT NULL déclarée au niveau ALTER   > impossible avec SQLite
---    PK composite	NULL	 déclarée au niveau ALTER   > impossible (une PK ne peut être NULL)
---    PK composite	NOT NULL déclarée au niveau ALTER   > impossible avec SQLite
---    FK simple		NULL     déclarée au niveau colonne > oui
---    FK simple	    NOT NULL déclarée au niveau colonne > oui
---    FK composite	NULL	 déclarée au niveau colonne > impossible (une PK/FK composite ne peut être déclarée au niveau colonne)
---    FK composite	NOT NULL déclarée au niveau colonne > impossible (une PK/FK composite ne peut être déclarée au niveau colonne)
---    FK simple		NULL     déclarée au niveau table   > oui
---    FK simple	    NOT NULL déclarée au niveau table   > oui
---    FK composite	NULL	 déclarée au niveau table   > oui
---    FK composite	NOT NULL déclarée au niveau table   > oui
---    FK simple		NULL     déclarée au niveau ALTER   > impossible avec SQLite
---    FK simple	    NOT NULL déclarée au niveau ALTER   > impossible avec SQLite
---    FK composite	NULL	 déclarée au niveau ALTER   > impossible avec SQLite
---    FK composite	NOT NULL déclarée au niveau ALTER   > impossible avec SQLite
+-- PK simple	 déclarée au niveau colonne         >
+-- PK simple	 déclarée au niveau table           >
+-- PK composite	 déclarée au niveau table           >
+-- PK simple	 déclarée au niveau ALTER           > impossible avec SQLite
+-- PK composite	 déclarée au niveau ALTER           > impossible avec SQLite
+-- FK simple	NULL     déclarée au niveau colonne >
+-- FK simple	NOT NULL déclarée au niveau colonne >
+-- FK simple	NULL     déclarée au niveau table   >
+-- FK simple	NOT NULL déclarée au niveau table   >
+-- FK composite NULL	 déclarée au niveau table   >
+-- FK composite NOT NULL déclarée au niveau table   >
+-- FK simple	NULL     déclarée au niveau ALTER   > impossible avec SQLite
+-- FK simple	NOT NULL déclarée au niveau ALTER   > impossible avec SQLite
+-- FK composite	NULL	 déclarée au niveau ALTER   > impossible avec SQLite
+-- FK composite	NOT NULL déclarée au niveau ALTER   > impossible avec SQLite
 
 CREATE TABLE
 -- correspondant (mêmes tables, mêmes colonnes, mêmes contraintes -- seul le

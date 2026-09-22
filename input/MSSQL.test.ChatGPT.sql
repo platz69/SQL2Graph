@@ -1,226 +1,198 @@
 ﻿-- Présence dans ce script de :
--- PK simple		NULL     déclarée au niveau colonne > impossible (une PK ne peut être NULL)
--- PK simple	    NOT NULL déclarée au niveau colonne > oui
--- PK composite	NULL	 déclarée au niveau colonne > impossible (une PK/FK composite ne peut être déclarée au niveau colonne)
--- PK composite	NOT NULL déclarée au niveau colonne > impossible (une PK/FK composite ne peut être déclarée au niveau colonne)
--- PK simple		NULL     déclarée au niveau table   > impossible (une PK ne peut être NULL)
--- PK simple	    NOT NULL déclarée au niveau table   > oui
--- PK composite	NULL	 déclarée au niveau table   > impossible (une PK ne peut être NULL)
--- PK composite	NOT NULL déclarée au niveau table   > oui
--- PK simple		NULL     déclarée au niveau ALTER   > impossible (une PK ne peut être NULL)
--- PK simple	    NOT NULL déclarée au niveau ALTER   > oui
--- PK composite	NULL	 déclarée au niveau ALTER   > impossible (une PK ne peut être NULL)
--- PK composite	NOT NULL déclarée au niveau ALTER   > oui
--- FK simple		NULL     déclarée au niveau colonne > oui
--- FK simple	    NOT NULL déclarée au niveau colonne > ************NON
--- FK composite	NULL	 déclarée au niveau colonne > impossible (une PK/FK composite ne peut être déclarée au niveau colonne)
--- FK composite	NOT NULL déclarée au niveau colonne > impossible (une PK/FK composite ne peut être déclarée au niveau colonne)
--- FK simple		NULL     déclarée au niveau table   > oui
--- FK simple	    NOT NULL déclarée au niveau table   > oui
--- FK composite	NULL	 déclarée au niveau table   > oui
--- FK composite	NOT NULL déclarée au niveau table   > oui
--- FK simple		NULL     déclarée au niveau ALTER   > oui
--- FK simple	    NOT NULL déclarée au niveau ALTER   > oui
+-- PK simple	 déclarée au niveau colonne         > oui
+-- PK simple	 déclarée au niveau table           > oui
+-- PK composite	 déclarée au niveau table           > oui
+-- PK simple	 déclarée au niveau ALTER           > oui
+-- PK composite	 déclarée au niveau ALTER           > oui
+-- FK simple	NULL     déclarée au niveau colonne > oui
+-- FK simple	NOT NULL déclarée au niveau colonne > oui
+-- FK simple	NULL     déclarée au niveau table   > oui
+-- FK simple	NOT NULL déclarée au niveau table   > oui
+-- FK composite NULL	 déclarée au niveau table   > oui
+-- FK composite NOT NULL déclarée au niveau table   > oui
+-- FK simple	NULL     déclarée au niveau ALTER   > oui
+-- FK simple	NOT NULL déclarée au niveau ALTER   > oui
 -- FK composite	NULL	 déclarée au niveau ALTER   > oui
 -- FK composite	NOT NULL déclarée au niveau ALTER   > oui
 
 CREATE DATABASE BaseTestCles;
-GO
 USE BaseTestCles;
-GO
 
--- ============================================================
--- 1. CLES PRIMAIRES : définition au niveau colonne
--- ============================================================
-CREATE TABLE Client_Colonne (
-    IdClient INT PRIMARY KEY, -- PK simple	    NOT NULL déclarée au niveau colonne
+CREATE TABLE Client (
+    IdClient INT PRIMARY KEY, -- PK simple	 déclarée au niveau colonne
     Nom NVARCHAR(100)
 );
-GO
 
--- 2. CLE PRIMAIRE : définition au niveau table
-CREATE TABLE Client_Table (
+CREATE TABLE ClientProfessionnel (
     IdClient INT NOT NULL,
     Nom NVARCHAR(100),
-    CONSTRAINT PK_Client_Table PRIMARY KEY (IdClient) -- PK simple
+    CONSTRAINT PK_ClientProfessionnel PRIMARY KEY (IdClient) -- PK simple	 déclarée au niveau table
 );
-GO
 
--- 3. CLE PRIMAIRE COMPOSITE : niveau table
-CREATE TABLE Produit (
+CREATE TABLE Article (
     IdProduit INT NOT NULL,
     VersionProduit INT NOT NULL,
     Nom NVARCHAR(100),
-    CONSTRAINT PK_Produit PRIMARY KEY (IdProduit, VersionProduit) -- PK composite
+    CONSTRAINT PK_Article PRIMARY KEY (IdProduit, VersionProduit) -- PK composite	 déclarée au niveau table
 );
-GO
 
--- 4. FK simple inline au niveau colonne
-CREATE TABLE Commande_Colonne (
-    IdCommande INT PRIMARY KEY, -- PK simple	    NOT NULL déclarée au niveau colonne
-    IdClient INT REFERENCES Client_Colonne(IdClient), -- FK simple
+CREATE TABLE Commande (
+    IdCommande INT PRIMARY KEY, -- PK simple	 déclarée au niveau colonne
+    IdClient INT REFERENCES Client(IdClient), -- FK simple	NULL     déclarée au niveau colonne
     DateCommande DATE
 );
-GO
 
--- 5. FK simple au niveau table
-CREATE TABLE Commande_Table (
-    IdCommande INT PRIMARY KEY, -- PK simple	    NOT NULL déclarée au niveau colonne
+CREATE TABLE CommandeProfessionnelle (
+    IdCommande INT PRIMARY KEY, -- PK simple	 déclarée au niveau colonne
     IdClient INT,
     DateCommande DATE,
-    CONSTRAINT FK_Commande_Table_Client
-        FOREIGN KEY (IdClient) REFERENCES Client_Table(IdClient)
+    CONSTRAINT FK_CommandeProfessionnelle_Client
+        FOREIGN KEY (IdClient) REFERENCES ClientProfessionnel(IdClient) -- FK simple	NULL     déclarée au niveau table
 );
-GO
 
--- 6. FK composite au niveau table
-CREATE TABLE LigneProduit (
-    IdLigne INT PRIMARY KEY, -- PK simple	    NOT NULL déclarée au niveau colonne
+CREATE TABLE LigneCommande (
+    IdLigne INT PRIMARY KEY, -- PK simple	 déclarée au niveau colonne
     IdProduit INT NOT NULL,
     VersionProduit INT NOT NULL,
     Quantite INT,
-    CONSTRAINT FK_LigneProduit_Produit
+    CONSTRAINT FK_LigneCommande_Article
         FOREIGN KEY (IdProduit, VersionProduit)
-        REFERENCES Produit(IdProduit, VersionProduit)
+        REFERENCES Article(IdProduit, VersionProduit)-- FK composite NOT NULL	 déclarée au niveau table
 );
-GO
 
--- ============================================================
--- 7. FK déclarée après création avec ALTER TABLE
--- ============================================================
 CREATE TABLE Facture (
-    IdFacture INT PRIMARY KEY, -- PK simple	    NOT NULL déclarée au niveau colonne
+    IdFacture INT PRIMARY KEY, -- PK simple	 déclarée au niveau colonne
     IdClient INT NULL,
     Montant DECIMAL(10,2)
 );
-GO
 
-ALTER TABLE Facture
-ADD CONSTRAINT FK_Facture_Client
-    FOREIGN KEY (IdClient) REFERENCES Client_Colonne(IdClient);
-GO
+CREATE TABLE ContactClient (
+    IdPK INT NOT NULL REFERENCES Client(IdClient), -- FK simple	NOT NULL déclarée au niveau colonne
+    IdClient INT NOT NULL,
+    Nom NVARCHAR(100)
+);
+
+CREATE TABLE ArticleCategorie (
+    IdPK1 INT NOT NULL,
+    IdPK2 INT NOT NULL,
+    IdProduit INT NULL,
+    VersionProduit INT NULL,
+    CONSTRAINT FK_ArticleCategorie_Article
+        FOREIGN KEY (IdProduit, VersionProduit)
+        REFERENCES Article(IdProduit, VersionProduit) -- FK composite NULL	 déclarée au niveau table
+);
 
 -- ============================================================
 -- 8. Cardinalité 1..n : FK NOT NULL non UNIQUE
 -- ============================================================
-CREATE TABLE Commande_1N (
-    IdCommande INT PRIMARY KEY, -- PK simple	    NOT NULL déclarée au niveau colonne
+CREATE TABLE CommandeClient (
+    IdCommande INT PRIMARY KEY, -- PK simple	 déclarée au niveau colonne
     IdClient INT NOT NULL,
-    CONSTRAINT FK_Commande_1N_Client
-        FOREIGN KEY (IdClient) REFERENCES Client_Colonne(IdClient)
+    CONSTRAINT FK_CommandeClient_Client
+        FOREIGN KEY (IdClient) REFERENCES Client(IdClient) -- FK simple	NOT NULL     déclarée au niveau table
 );
-GO
 
 -- ============================================================
 -- 9. Cardinalité 0..n : FK NULL non UNIQUE
 -- ============================================================
-CREATE TABLE Facture_0N (
-    IdFacture INT PRIMARY KEY, -- PK simple	    NOT NULL déclarée au niveau colonne
+CREATE TABLE FactureClient (
+    IdFacture INT PRIMARY KEY, -- PK simple	 déclarée au niveau colonne
     IdClient INT NULL,
-    CONSTRAINT FK_Facture_0N_Client
-        FOREIGN KEY (IdClient) REFERENCES Client_Colonne(IdClient)
+    CONSTRAINT FK_FactureClient_Client
+        FOREIGN KEY (IdClient) REFERENCES Client(IdClient)
 );
-GO
 
 -- ============================================================
 -- 10. Cardinalité 1..1 / 1..0..1 : FK UNIQUE NOT NULL
 -- ============================================================
-CREATE TABLE CompteClient_11 (
-    IdCompte INT PRIMARY KEY, -- PK simple	    NOT NULL déclarée au niveau colonne
+CREATE TABLE CompteClient (
+    IdCompte INT PRIMARY KEY, -- PK simple	 déclarée au niveau colonne
     IdClient INT NOT NULL UNIQUE,
-    CONSTRAINT FK_CompteClient_11_Client
-        FOREIGN KEY (IdClient) REFERENCES Client_Colonne(IdClient)
+    CONSTRAINT FK_CompteClient_Client
+        FOREIGN KEY (IdClient) REFERENCES Client(IdClient) -- FK simple	NOT NULL     déclarée au niveau table
 );
-GO
 
 -- Variante : UNIQUE déclaré au niveau table
-CREATE TABLE CarteClient (
-    IdCarte INT PRIMARY KEY, -- PK simple	    NOT NULL déclarée au niveau colonne
+CREATE TABLE CarteFidelite (
+    IdCarte INT PRIMARY KEY, -- PK simple	 déclarée au niveau colonne
     IdClient INT NOT NULL,
     CONSTRAINT UQ_CarteClient_Client UNIQUE (IdClient),
-    CONSTRAINT FK_CarteClient_Client
-        FOREIGN KEY (IdClient) REFERENCES Client_Colonne(IdClient)
+    CONSTRAINT FK_CarteFidelite_Client
+        FOREIGN KEY (IdClient) REFERENCES Client(IdClient) -- FK simple	NOT NULL     déclarée au niveau table
 );
-GO
 
 -- ============================================================
 -- 11. Cardinalité 0..1 : FK UNIQUE nullable
 -- ============================================================
-CREATE TABLE ProfilClient (
-    IdProfil INT PRIMARY KEY, -- PK simple	    NOT NULL déclarée au niveau colonne
+CREATE TABLE Profil (
+    IdProfil INT PRIMARY KEY, -- PK simple	 déclarée au niveau colonne
     IdClient INT NULL,
     CONSTRAINT UQ_ProfilClient_Client UNIQUE (IdClient),
-    CONSTRAINT FK_ProfilClient_Client
-        FOREIGN KEY (IdClient) REFERENCES Client_Colonne(IdClient)
+    CONSTRAINT FK_Profil_Client
+        FOREIGN KEY (IdClient) REFERENCES Client(IdClient) -- FK simple	NULL     déclarée au niveau table
 );
-GO
 
 -- ============================================================
 -- 12. n..n : table d'association avec PK composite
 -- ============================================================
-CREATE TABLE Client_Produit (
+CREATE TABLE ClientArticle (
     IdClient INT NOT NULL,
     IdProduit INT NOT NULL,
     VersionProduit INT NOT NULL,
-    CONSTRAINT PK_Client_Produit PRIMARY KEY (IdClient, IdProduit, VersionProduit), -- PK composite
-    CONSTRAINT FK_Client_Produit_Client
-        FOREIGN KEY (IdClient) REFERENCES Client_Colonne(IdClient),
-    CONSTRAINT FK_Client_Produit_Produit
+    CONSTRAINT PK_Client_Produit PRIMARY KEY (IdClient, IdProduit, VersionProduit), -- PK composite	 déclarée au niveau table
+    CONSTRAINT FK_ClientArticle_Client
+        FOREIGN KEY (IdClient) REFERENCES Client(IdClient), -- FK simple	NOT NULL     déclarée au niveau table
+    CONSTRAINT FK_ClientArticle_Article
         FOREIGN KEY (IdProduit, VersionProduit)
-        REFERENCES Produit(IdProduit, VersionProduit)
+        REFERENCES Article(IdProduit, VersionProduit)-- FK composite NOT NULL	 déclarée au niveau table
 );
-GO
 
--- ============================================================
--- 13. FK composite déclarée par ALTER TABLE
--- ============================================================
-CREATE TABLE HistoriqueProduit (
-    IdHistorique INT PRIMARY KEY, -- PK simple	    NOT NULL déclarée au niveau colonne
+CREATE TABLE MouvementStock (
+    IdHistorique INT PRIMARY KEY, -- PK simple	 déclarée au niveau colonne
     IdProduit INT NOT NULL,
     VersionProduit INT NOT NULL
 );
-GO
 
-ALTER TABLE HistoriqueProduit
-ADD CONSTRAINT FK_HistoriqueProduit_Produit
-    FOREIGN KEY (IdProduit, VersionProduit)
-    REFERENCES Produit(IdProduit, VersionProduit);
-GO
-
--- ============================================================
--- 14. FK SIMPLE NULLABLE INLINE (niveau colonne)
--- ============================================================
-CREATE TABLE Adresse_Colonne_Nullable (
-    IdAdresse INT PRIMARY KEY, -- PK simple	    NOT NULL déclarée au niveau colonne
-    IdClient INT NULL REFERENCES Client_Colonne(IdClient), -- FK simple
+CREATE TABLE AdresseClient (
+    IdAdresse INT PRIMARY KEY, -- PK simple	 déclarée au niveau colonne
+    IdClient INT NULL REFERENCES Client(IdClient), -- FK simple	NULL     déclarée au niveau colonne
     Libelle NVARCHAR(100)
 );
-GO
 
--- ============================================================
--- 15. FK SIMPLE NULLABLE (niveau table)
--- ============================================================
-CREATE TABLE Adresse_Table_Nullable (
-    IdAdresse INT PRIMARY KEY, -- PK simple	    NOT NULL déclarée au niveau colonne
+CREATE TABLE AdresseLivraison (
+    IdAdresse INT PRIMARY KEY, -- PK simple	 déclarée au niveau colonne
     IdClient INT NULL,
     Libelle NVARCHAR(100),
-    CONSTRAINT FK_Adresse_Table_Nullable_Client
-        FOREIGN KEY (IdClient) REFERENCES Client_Colonne(IdClient)
+    CONSTRAINT FK_AdresseLivraison_Client
+        FOREIGN KEY (IdClient) REFERENCES Client(IdClient) -- FK simple	NULL     déclarée au niveau table
 );
-GO
 
--- ============================================================
--- 16. FK COMPOSITE NULLABLE déclarée par ALTER TABLE
--- ============================================================
-CREATE TABLE HistoriqueProduit_Nullable (
-    IdHistorique INT PRIMARY KEY, -- PK simple	    NOT NULL déclarée au niveau colonne
+CREATE TABLE SuiviArticle (
+    IdHistorique INT PRIMARY KEY, -- PK simple	 déclarée au niveau colonne
     IdProduit INT NULL,
     VersionProduit INT NULL
 );
-GO
 
-ALTER TABLE HistoriqueProduit_Nullable
-ADD CONSTRAINT FK_HistoriqueProduit_Nullable_Produit
+ALTER TABLE Facture
+ADD CONSTRAINT FK_Facture_Client
+    FOREIGN KEY (IdClient) REFERENCES Client(IdClient); -- FK simple	NULL     déclarée au niveau ALTER
+
+ALTER TABLE MouvementStock
+ADD CONSTRAINT FK_MouvementStock_Article
     FOREIGN KEY (IdProduit, VersionProduit)
-    REFERENCES Produit(IdProduit, VersionProduit);
-GO
+    REFERENCES Article(IdProduit, VersionProduit); -- FK composite	NOT NULL déclarée au niveau ALTER
+
+ALTER TABLE SuiviArticle
+ADD CONSTRAINT FK_SuiviArticle_Article
+    FOREIGN KEY (IdProduit, VersionProduit)
+    REFERENCES Article(IdProduit, VersionProduit); -- FK composite	NULL déclarée au niveau ALTER
+
+ALTER TABLE ContactClient
+ADD CONSTRAINT PK_ContactClient PRIMARY KEY (IdPK); -- PK simple	 déclarée au niveau ALTER
+
+ALTER TABLE ContactClient
+ADD CONSTRAINT FK_ContactClient_Client
+    FOREIGN KEY (IdClient) REFERENCES Client(IdClient); -- FK simple	NOT NULL déclarée au niveau ALTER
+
+ALTER TABLE ArticleCategorie
+ADD CONSTRAINT PK_ArticleCategorie PRIMARY KEY (IdPK1, IdPK2); -- PK composite	 déclarée au niveau ALTER
