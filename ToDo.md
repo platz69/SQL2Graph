@@ -22,6 +22,7 @@ du script actuel.
 1/ traiter les bouts 'target' des flèches
 2/ détecter les jointurs pour suppressin table + réductions 1-n + table + n-1 > n-n
 
+----------------
 valeurs possibles des attributs "source/target" en .grapjml Yed :
         Yed                         drawio
 ?..?    none                            
@@ -31,8 +32,24 @@ valeurs possibles des attributs "source/target" en .grapjml Yed :
 0..1    crows_foot_one_optional     ERzeroToOne                  
 0..n    crows_foot_many_optional    ERzeroToMany                       
 1..1    crows_foot_one_mandatory    ERmandOne                     
-1..n    crows_foot_many_mandatory   ERoneToMany    
-
-vérifier tous les commentaires oui/non et -- PK inline (colonne) -- PK simple générés par copilot
+1..n    crows_foot_many_mandatory   ERoneToMany         non-décidable en SQL : nécessité trigger ou logique applicative 
+---------------------
+contrainte sur id_parent    cardinalités                   
+<aucune>                    0..1 ------------------- ?..n
+NOT NULL                    1..1 ------------------- ?..n
+UNIQUE                      0..1 ------------------- ?..1
+UNIQUE NOT NULL             1..1 ------------------- ?..1
+------------------------
+faire à la main IA pas top :
+déplace les blocs "ALTER" juste après les "CREATE TABLE" correspondants. Ne prends aucune autre initiative
+-------------------------
+vérifier tous les commentaires oui/non et -- (Les MSSQL.test.*.sql sont déjà vérifiés)
 MSSQL.test.Perplexity.sql PAS parsé à partie de : -- 10) Table client_contact (n..n) (rate la table et ses FK)
-
+------------------------
+Débugguer toutes les détections d'unicité, y a plein de trous dans le parsing,exemple :
+il faut Client 0..1-------?..1 Profil  et pas ?..n
+MSSQL ne parse pas UNIQUE au niveau table (et peut-être pas non-plus au niveau ALTER) :
+CONSTRAINT UQ_ProfilClient_Client UNIQUE (IdClient) en MSSQL
+mais ceci oui :
+IdClient INT NOT NULL UNIQUE
+voir réponse IA dans /download/en.résumé.png

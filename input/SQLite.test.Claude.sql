@@ -1,4 +1,5 @@
 ﻿-- Présence dans ce script de :
+
 -- PK simple	 déclarée au niveau colonne         >
 -- PK simple	 déclarée au niveau table           >
 -- PK composite	 déclarée au niveau table           >
@@ -14,6 +15,11 @@
 -- FK simple	NOT NULL déclarée au niveau ALTER   > impossible avec SQLite
 -- FK composite	NULL	 déclarée au niveau ALTER   > impossible avec SQLite
 -- FK composite	NOT NULL déclarée au niveau ALTER   > impossible avec SQLite
+
+-- Cardinalité 0..1-------?..n                      >
+-- Cardinalité 1..1-------?..n                      >
+-- Cardinalité 0..1-------?..1                      >
+-- Cardinalité 1..1-------?..1                      >
 
 CREATE TABLE
 -- correspondant (mêmes tables, mêmes colonnes, mêmes contraintes -- seul le

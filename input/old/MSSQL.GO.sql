@@ -1,4 +1,4 @@
-CREATE TABLE [dbo].[Client]
+﻿CREATE TABLE [dbo].[Client]
 (
     [Id] [int] NOT NULL,
 
@@ -15,10 +15,10 @@ CREATE TABLE [dbo].[Commande]
     CONSTRAINT [PK_Commande]
         PRIMARY KEY ([Id])
 );
-GO
 
 ALTER TABLE [dbo].[Commande]
 ADD CONSTRAINT [FK_Commande_Client]
     FOREIGN KEY ([ClientId])
     REFERENCES [dbo].[Client] ([Id]);
+GO
 GO

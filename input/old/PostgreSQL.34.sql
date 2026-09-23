@@ -1,4 +1,4 @@
-CREATE TABLE advantage (
+﻿CREATE TABLE advantage (
     id INTEGER NOT NULL,
     code_cp TEXT NOT NULL,
     description TEXT,
@@ -29,6 +29,12 @@ CREATE TABLE advantage (
     date_tolerance TEXT
 );
 
+ALTER TABLE ONLY advantage
+    ADD CONSTRAINT advantage_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY advantage
+    ADD CONSTRAINT advantage_adv_type_fkey FOREIGN KEY (adv_type) REFERENCES advantage_type(adv_type);
+
 CREATE TABLE advantage_type (
     adv_type TEXT NOT NULL,
     adv_order INTEGER,
@@ -41,6 +47,9 @@ CREATE TABLE advantage_type (
     need_photo INTEGER
 );
 
+ALTER TABLE ONLY advantage_type
+    ADD CONSTRAINT advantage_type_pkey PRIMARY KEY (adv_type);
+
 CREATE TABLE alert (
     id INTEGER NOT NULL,
     read INTEGER NOT NULL,
@@ -51,11 +60,26 @@ CREATE TABLE alert (
     code_cp_3 TEXT
 );
 
+ALTER TABLE ONLY alert
+    ADD CONSTRAINT alert_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY alert
+    ADD CONSTRAINT alert_code_cp_2_fkey FOREIGN KEY (code_cp_2) REFERENCES user_sncf(code_cp) ON DELETE CASCADE;
+
+ALTER TABLE ONLY alert
+    ADD CONSTRAINT alert_code_cp_fkey FOREIGN KEY (code_cp) REFERENCES user_sncf(code_cp) ON DELETE CASCADE;
+
+ALTER TABLE ONLY alert
+    ADD CONSTRAINT alert_code_type_alert_fkey FOREIGN KEY (code_type_alert) REFERENCES alert_type(code_type_alert);
+
 CREATE TABLE alert_type (
     code_type_alert TEXT NOT NULL,
     message TEXT,
     is_confirm INTEGER
 );
+
+ALTER TABLE ONLY alert_type
+    ADD CONSTRAINT alert_type_pkey PRIMARY KEY (code_type_alert);
 
 CREATE TABLE banner (
     id INTEGER NOT NULL,
@@ -70,12 +94,18 @@ CREATE TABLE banner (
     last_modified_by TEXT NOT NULL
 );
 
+ALTER TABLE ONLY banner
+    ADD CONSTRAINT banner_pkey PRIMARY KEY (id);
+
 CREATE TABLE cgu (
     id INTEGER NOT NULL,
     content TEXT,
     enabled INTEGER NOT NULL,
     created_at TEXT
 );
+
+ALTER TABLE ONLY cgu
+    ADD CONSTRAINT cgu_pkey PRIMARY KEY (id);
 
 CREATE TABLE faq (
     id INTEGER NOT NULL,
@@ -84,6 +114,9 @@ CREATE TABLE faq (
     enabled INTEGER NOT NULL,
     adt_displayed INTEGER NOT NULL
 );
+
+ALTER TABLE ONLY faq
+    ADD CONSTRAINT faq_pkey PRIMARY KEY (id);
 
 CREATE TABLE fc (
     id INTEGER NOT NULL,
@@ -100,6 +133,12 @@ CREATE TABLE fc (
     sync_date TEXT
 );
 
+ALTER TABLE ONLY fc
+    ADD CONSTRAINT fc_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY fc
+    ADD CONSTRAINT fc_adv_id_fkey FOREIGN KEY (adv_id) REFERENCES advantage(id) ON DELETE CASCADE;
+
 CREATE TABLE file_generation_status (
     id INTEGER NOT NULL,
     start_date TEXT NOT NULL,
@@ -107,6 +146,9 @@ CREATE TABLE file_generation_status (
     status INTEGER NOT NULL,
     number_rows INTEGER NOT NULL
 );
+
+ALTER TABLE ONLY file_generation_status
+    ADD CONSTRAINT file_generation_status_pkey PRIMARY KEY (id);
 
 CREATE TABLE flyway_schema_history (
     installed_rank INTEGER NOT NULL,
@@ -121,9 +163,15 @@ CREATE TABLE flyway_schema_history (
     success INTEGER NOT NULL
 );
 
+ALTER TABLE ONLY flyway_schema_history
+    ADD CONSTRAINT flyway_schema_history_pk PRIMARY KEY (installed_rank);
+
 CREATE TABLE forbidden_password (
     password TEXT NOT NULL
 );
+
+ALTER TABLE ONLY forbidden_password
+    ADD CONSTRAINT forbidden_password_pkey PRIMARY KEY (password);
 
 CREATE TABLE log (
     id INTEGER NOT NULL,
@@ -134,6 +182,9 @@ CREATE TABLE log (
     date_action TEXT NOT NULL,
     message TEXT NOT NULL
 );
+
+ALTER TABLE ONLY log
+    ADD CONSTRAINT log_pkey PRIMARY KEY (id);
 
 CREATE TABLE mfc2children4alerttmp (
     code_cp TEXT NOT NULL,
@@ -190,12 +241,18 @@ CREATE TABLE otp (
     date TEXT NOT NULL
 );
 
+ALTER TABLE ONLY otp
+    ADD CONSTRAINT otp_pkey PRIMARY KEY (id);
+
 CREATE TABLE password_history (
     id INTEGER NOT NULL,
     cp TEXT NOT NULL,
     value TEXT NOT NULL,
     created_at TEXT
 );
+
+ALTER TABLE ONLY password_history
+    ADD CONSTRAINT password_history_pkey PRIMARY KEY (id);
 
 CREATE TABLE photo (
     id INTEGER NOT NULL,
@@ -210,11 +267,17 @@ CREATE TABLE photo (
     marked_for_deletion TEXT
 );
 
+ALTER TABLE ONLY photo
+    ADD CONSTRAINT photo_pkey PRIMARY KEY (id);
+
 CREATE TABLE question (
     id INTEGER NOT NULL,
     question TEXT NOT NULL,
     enabled INTEGER NOT NULL
 );
+
+ALTER TABLE ONLY question
+    ADD CONSTRAINT question_pkey PRIMARY KEY (id);
 
 CREATE TABLE setting (
     setting_key TEXT NOT NULL,
@@ -223,12 +286,21 @@ CREATE TABLE setting (
     setting_value_date TEXT
 );
 
+ALTER TABLE ONLY setting
+    ADD CONSTRAINT setting_pkey PRIMARY KEY (setting_key);
+
 CREATE TABLE token (
     id INTEGER NOT NULL,
     code_cp TEXT,
     token TEXT,
     created_at TEXT
 );
+
+ALTER TABLE ONLY token
+    ADD CONSTRAINT token_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY token
+    ADD CONSTRAINT token_code_cp_user_sncf_fkey FOREIGN KEY (code_cp) REFERENCES user_sncf(code_cp) ON DELETE CASCADE;
 
 CREATE TABLE trusted_devices (
     id INTEGER NOT NULL,
@@ -239,6 +311,9 @@ CREATE TABLE trusted_devices (
     device TEXT NOT NULL,
     created_at TEXT
 );
+
+ALTER TABLE ONLY trusted_devices
+    ADD CONSTRAINT trusted_devices_pkey PRIMARY KEY (id);
 
 CREATE TABLE user_admin (
     id INTEGER NOT NULL,
@@ -252,6 +327,18 @@ CREATE TABLE user_admin (
     last_modified_by TEXT NOT NULL
 );
 
+ALTER TABLE ONLY user_admin
+    ADD CONSTRAINT user_admin_code_cp_key UNIQUE (code_cp);
+
+ALTER TABLE ONLY user_admin
+    ADD CONSTRAINT user_admin_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY user_admin
+    ADD CONSTRAINT user_admin_code_cp_fkey FOREIGN KEY (code_cp) REFERENCES user_sncf(code_cp);
+
+ALTER TABLE ONLY user_admin
+    ADD CONSTRAINT user_admin_entity_fkey FOREIGN KEY (entity) REFERENCES user_entity(id);
+
 CREATE TABLE user_blocked (
     id INTEGER NOT NULL,
     code_cp TEXT NOT NULL,
@@ -262,12 +349,27 @@ CREATE TABLE user_blocked (
     admin_firstname TEXT NOT NULL
 );
 
+ALTER TABLE ONLY user_blocked
+    ADD CONSTRAINT user_blocked_pkey PRIMARY KEY (id);
+
 CREATE TABLE user_cgu (
     id INTEGER NOT NULL,
     code_cp TEXT,
     cgu_id INTEGER NOT NULL,
     created_at TEXT
 );
+
+ALTER TABLE ONLY user_cgu
+    ADD CONSTRAINT user_cgu_code_cp_cgu_id_key UNIQUE (code_cp, cgu_id);
+
+ALTER TABLE ONLY user_cgu
+    ADD CONSTRAINT user_cgu_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY user_cgu
+    ADD CONSTRAINT user_cgu_cgu_id_fkey FOREIGN KEY (cgu_id) REFERENCES cgu(id);
+
+ALTER TABLE ONLY user_cgu
+    ADD CONSTRAINT user_cgu_code_cp_fkey FOREIGN KEY (code_cp) REFERENCES user_sncf(code_cp) ON DELETE CASCADE;
 
 CREATE TABLE user_children_alert (
     id INTEGER NOT NULL,
@@ -276,6 +378,12 @@ CREATE TABLE user_children_alert (
     child_lastname TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+
+ALTER TABLE ONLY user_children_alert
+    ADD CONSTRAINT user_children_alert_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY user_children_alert
+    ADD CONSTRAINT user_children_alert_code_cp_fkey FOREIGN KEY (code_cp) REFERENCES user_sncf(code_cp) ON DELETE CASCADE;
 
 CREATE TABLE user_delegation (
     id INTEGER NOT NULL,
@@ -293,16 +401,37 @@ CREATE TABLE user_delegation (
     code_cp_admin TEXT
 );
 
+ALTER TABLE ONLY user_delegation
+    ADD CONSTRAINT user_delegation_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY user_delegation
+    ADD CONSTRAINT user_delegation_code_cp_beneficiary_fkey FOREIGN KEY (code_cp_beneficiary) REFERENCES user_sncf(code_cp) ON DELETE CASCADE;
+
+ALTER TABLE ONLY user_delegation
+    ADD CONSTRAINT user_delegation_code_cp_delegatee_fkey FOREIGN KEY (code_cp_delegatee) REFERENCES user_sncf(code_cp) ON DELETE CASCADE;
+
+ALTER TABLE ONLY user_delegation
+    ADD CONSTRAINT user_delegation_code_cp_delegator_fkey FOREIGN KEY (code_cp_delegator) REFERENCES user_sncf(code_cp) ON DELETE CASCADE;
+
 CREATE TABLE user_entity (
     id INTEGER NOT NULL,
     name TEXT NOT NULL
 );
+
+ALTER TABLE ONLY user_entity
+    ADD CONSTRAINT user_entity_name_key UNIQUE (name);
+
+ALTER TABLE ONLY user_entity
+    ADD CONSTRAINT user_entity_pkey PRIMARY KEY (id);
 
 CREATE TABLE user_link (
     id INTEGER NOT NULL,
     code_cp_delegator TEXT NOT NULL,
     code_cp_delegatee TEXT NOT NULL
 );
+
+ALTER TABLE ONLY user_link
+    ADD CONSTRAINT user_link_pkey PRIMARY KEY (id);
 
 CREATE TABLE user_question (
     code_cp TEXT NOT NULL,
@@ -312,10 +441,28 @@ CREATE TABLE user_question (
     answer2 TEXT NOT NULL
 );
 
+ALTER TABLE ONLY user_question
+    ADD CONSTRAINT user_question_pkey PRIMARY KEY (code_cp);
+
+ALTER TABLE ONLY user_question
+    ADD CONSTRAINT user_question_code_cp_fkey FOREIGN KEY (code_cp) REFERENCES user_sncf(code_cp) ON DELETE CASCADE;
+
+ALTER TABLE ONLY user_question
+    ADD CONSTRAINT user_question_question1_id_fkey FOREIGN KEY (question1_id) REFERENCES question(id);
+
+ALTER TABLE ONLY user_question
+    ADD CONSTRAINT user_question_question2_id_fkey FOREIGN KEY (question2_id) REFERENCES question(id);
+
 CREATE TABLE user_role (
     code_cp TEXT NOT NULL,
     role TEXT NOT NULL
 );
+
+ALTER TABLE ONLY user_role
+    ADD CONSTRAINT user_role_unique_code_role UNIQUE (code_cp, role);
+
+ALTER TABLE ONLY user_role
+    ADD CONSTRAINT user_role_code_cp_user_sncf_fkey FOREIGN KEY (code_cp) REFERENCES user_sncf(code_cp) ON DELETE CASCADE;
 
 CREATE TABLE user_sncf (
     code_cp TEXT NOT NULL,
@@ -347,165 +494,18 @@ CREATE TABLE user_sncf (
     last_mfc2_sync TEXT
 );
 
+ALTER TABLE ONLY user_sncf
+    ADD CONSTRAINT user_sncf_pkey PRIMARY KEY (code_cp);
+
+ALTER TABLE ONLY user_sncf
+    ADD CONSTRAINT fk_user_type FOREIGN KEY (user_type) REFERENCES user_type(id);
+
 CREATE TABLE user_type (
     id INTEGER NOT NULL,
     type TEXT NOT NULL,
     description TEXT NOT NULL
 );
 
-ALTER TABLE ONLY advantage
-    ADD CONSTRAINT advantage_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY advantage_type
-    ADD CONSTRAINT advantage_type_pkey PRIMARY KEY (adv_type);
-
-ALTER TABLE ONLY alert
-    ADD CONSTRAINT alert_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY alert_type
-    ADD CONSTRAINT alert_type_pkey PRIMARY KEY (code_type_alert);
-
-ALTER TABLE ONLY banner
-    ADD CONSTRAINT banner_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY cgu
-    ADD CONSTRAINT cgu_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY faq
-    ADD CONSTRAINT faq_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY fc
-    ADD CONSTRAINT fc_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY file_generation_status
-    ADD CONSTRAINT file_generation_status_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY flyway_schema_history
-    ADD CONSTRAINT flyway_schema_history_pk PRIMARY KEY (installed_rank);
-
-ALTER TABLE ONLY forbidden_password
-    ADD CONSTRAINT forbidden_password_pkey PRIMARY KEY (password);
-
-ALTER TABLE ONLY log
-    ADD CONSTRAINT log_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY otp
-    ADD CONSTRAINT otp_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY password_history
-    ADD CONSTRAINT password_history_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY photo
-    ADD CONSTRAINT photo_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY question
-    ADD CONSTRAINT question_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY setting
-    ADD CONSTRAINT setting_pkey PRIMARY KEY (setting_key);
-
-ALTER TABLE ONLY token
-    ADD CONSTRAINT token_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY trusted_devices
-    ADD CONSTRAINT trusted_devices_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY user_admin
-    ADD CONSTRAINT user_admin_code_cp_key UNIQUE (code_cp);
-
-ALTER TABLE ONLY user_admin
-    ADD CONSTRAINT user_admin_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY user_blocked
-    ADD CONSTRAINT user_blocked_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY user_cgu
-    ADD CONSTRAINT user_cgu_code_cp_cgu_id_key UNIQUE (code_cp, cgu_id);
-
-ALTER TABLE ONLY user_cgu
-    ADD CONSTRAINT user_cgu_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY user_children_alert
-    ADD CONSTRAINT user_children_alert_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY user_delegation
-    ADD CONSTRAINT user_delegation_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY user_entity
-    ADD CONSTRAINT user_entity_name_key UNIQUE (name);
-
-ALTER TABLE ONLY user_entity
-    ADD CONSTRAINT user_entity_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY user_link
-    ADD CONSTRAINT user_link_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY user_question
-    ADD CONSTRAINT user_question_pkey PRIMARY KEY (code_cp);
-
-ALTER TABLE ONLY user_role
-    ADD CONSTRAINT user_role_unique_code_role UNIQUE (code_cp, role);
-
-ALTER TABLE ONLY user_sncf
-    ADD CONSTRAINT user_sncf_pkey PRIMARY KEY (code_cp);
-
 ALTER TABLE ONLY user_type
     ADD CONSTRAINT user_type_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY advantage
-    ADD CONSTRAINT advantage_adv_type_fkey FOREIGN KEY (adv_type) REFERENCES advantage_type(adv_type);
-
-ALTER TABLE ONLY alert
-    ADD CONSTRAINT alert_code_cp_2_fkey FOREIGN KEY (code_cp_2) REFERENCES user_sncf(code_cp) ON DELETE CASCADE;
-
-ALTER TABLE ONLY alert
-    ADD CONSTRAINT alert_code_cp_fkey FOREIGN KEY (code_cp) REFERENCES user_sncf(code_cp) ON DELETE CASCADE;
-
-ALTER TABLE ONLY alert
-    ADD CONSTRAINT alert_code_type_alert_fkey FOREIGN KEY (code_type_alert) REFERENCES alert_type(code_type_alert);
-
-ALTER TABLE ONLY fc
-    ADD CONSTRAINT fc_adv_id_fkey FOREIGN KEY (adv_id) REFERENCES advantage(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY user_sncf
-    ADD CONSTRAINT fk_user_type FOREIGN KEY (user_type) REFERENCES user_type(id);
-
-ALTER TABLE ONLY token
-    ADD CONSTRAINT token_code_cp_user_sncf_fkey FOREIGN KEY (code_cp) REFERENCES user_sncf(code_cp) ON DELETE CASCADE;
-
-ALTER TABLE ONLY user_admin
-    ADD CONSTRAINT user_admin_code_cp_fkey FOREIGN KEY (code_cp) REFERENCES user_sncf(code_cp);
-
-ALTER TABLE ONLY user_admin
-    ADD CONSTRAINT user_admin_entity_fkey FOREIGN KEY (entity) REFERENCES user_entity(id);
-
-ALTER TABLE ONLY user_cgu
-    ADD CONSTRAINT user_cgu_cgu_id_fkey FOREIGN KEY (cgu_id) REFERENCES cgu(id);
-
-ALTER TABLE ONLY user_cgu
-    ADD CONSTRAINT user_cgu_code_cp_fkey FOREIGN KEY (code_cp) REFERENCES user_sncf(code_cp) ON DELETE CASCADE;
-
-ALTER TABLE ONLY user_children_alert
-    ADD CONSTRAINT user_children_alert_code_cp_fkey FOREIGN KEY (code_cp) REFERENCES user_sncf(code_cp) ON DELETE CASCADE;
-
-ALTER TABLE ONLY user_delegation
-    ADD CONSTRAINT user_delegation_code_cp_beneficiary_fkey FOREIGN KEY (code_cp_beneficiary) REFERENCES user_sncf(code_cp) ON DELETE CASCADE;
-
-ALTER TABLE ONLY user_delegation
-    ADD CONSTRAINT user_delegation_code_cp_delegatee_fkey FOREIGN KEY (code_cp_delegatee) REFERENCES user_sncf(code_cp) ON DELETE CASCADE;
-
-ALTER TABLE ONLY user_delegation
-    ADD CONSTRAINT user_delegation_code_cp_delegator_fkey FOREIGN KEY (code_cp_delegator) REFERENCES user_sncf(code_cp) ON DELETE CASCADE;
-
-ALTER TABLE ONLY user_question
-    ADD CONSTRAINT user_question_code_cp_fkey FOREIGN KEY (code_cp) REFERENCES user_sncf(code_cp) ON DELETE CASCADE;
-
-ALTER TABLE ONLY user_question
-    ADD CONSTRAINT user_question_question1_id_fkey FOREIGN KEY (question1_id) REFERENCES question(id);
-
-ALTER TABLE ONLY user_question
-    ADD CONSTRAINT user_question_question2_id_fkey FOREIGN KEY (question2_id) REFERENCES question(id);
-
-ALTER TABLE ONLY user_role
-    ADD CONSTRAINT user_role_code_cp_user_sncf_fkey FOREIGN KEY (code_cp) REFERENCES user_sncf(code_cp) ON DELETE CASCADE;
 

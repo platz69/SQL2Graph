@@ -512,22 +512,15 @@ def generer_MPD_drawio_ET(model: Modele, chemin_de_sortie: Path, diag_type: str)
         if fk_col is None:
             continue
 
-        nullable = fk_col.nullable
-        unique   = fk_col.is_unique
-
-        # valeurs par défaut qui permet de détecter visuellement des extrémités de flèches qui n'auraient pas été traitées dans les tests qui suivent
-        start_arrow = 'ERmany'
-        end_arrow   = 'ERone'
-
-        if nullable :
+        if fk_col.nullable :
             end_arrow  ='ERzeroToOne'
-        elif not nullable:
+        else:
             end_arrow  ='ERmandOne'
 
-        if unique:
-            start_arrow = 'ERzeroToOne'
-        elif not unique:
-            start_arrow = 'ERzeroToMany'
+        if fk_col.is_unique:
+            start_arrow = 'ERone'
+        else:
+            start_arrow = 'ERmany'
 
         # incrémentation du compteur de FK
         compteur_cles_etrangeres[rel.table_source] = compteur_cles_etrangeres.get(rel.table_source, 0) + 1
@@ -686,16 +679,16 @@ def main() -> None:
 
     # --- tables pour tester toutes syntaxes PK/FK et cardinalités ----
     # input_file = input_dir / "MSSQL.test.ChatGPT.sql"
+    input_file = input_dir / "MSSQL.test.Claude.sql"
+    # input_file = input_dir / "MSSQL.test.Perplexity.sql"
     # input_file = input_dir / "MySQL.test.ChatGPT.sql"
-    # input_file = input_dir / "PostgreSQL.test.ChatGPT.sql"
-    # input_file = input_dir / "SQLite.test.ChatGPT.sql" # absence des relations sur les tables HISTORIQUEPRODUIT et FACTURE
-    # input_file = input_dir / "MSSQL.test.Claude.sql"
     # input_file = input_dir / "MySQL.test.Claude.sql"
-    # input_file = input_dir / "PostgreSQL.test.Claude.sql"
-    # input_file = input_dir / "SQLite.test.Claude.sql"
-    input_file = input_dir / "MSSQL.test.Perplexity.sql"
     # input_file = input_dir / "MySQL.test.Perplexity.sql"
+    # input_file = input_dir / "PostgreSQL.test.ChatGPT.sql"
+    # input_file = input_dir / "PostgreSQL.test.Claude.sql"
     # input_file = input_dir / "PostgreSQL.test.Perplexity.sql"
+    # input_file = input_dir / "SQLite.test.ChatGPT.sql"         # absence des relations sur les tables HISTORIQUEPRODUIT et FACTURE
+    # input_file = input_dir / "SQLite.test.Claude.sql"
     # input_file = input_dir / "SQLite.test.Perplexity.sql"
 
     # --- autres exemples ----

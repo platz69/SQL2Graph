@@ -1,4 +1,5 @@
 ﻿-- Présence dans ce script de :
+
 -- PK simple	 déclarée au niveau colonne         > oui
 -- PK simple	 déclarée au niveau table           > oui
 -- PK composite	 déclarée au niveau table           > oui
@@ -14,6 +15,11 @@
 -- FK simple	NOT NULL déclarée au niveau ALTER   > oui
 -- FK composite	NULL	 déclarée au niveau ALTER   > oui
 -- FK composite	NOT NULL déclarée au niveau ALTER   > oui
+
+-- Cardinalité 0..1-------?..n                      >
+-- Cardinalité 1..1-------?..n                      >
+-- Cardinalité 0..1-------?..1                      >
+-- Cardinalité 1..1-------?..1                      >
 
 CREATE TABLE client (
     id_client        INT NOT NULL PRIMARY KEY,  -- PK simple	 déclarée au niveau colonne
