@@ -155,7 +155,8 @@ ADD CONSTRAINT PK_ContactClient PRIMARY KEY (IdPK); -- PK simple	 déclarée au 
 
 ALTER TABLE ContactClient
 ADD CONSTRAINT FK_ContactClient_Client
-    FOREIGN KEY (IdClient) REFERENCES Client(IdClient); -- FK simple	NOT NULL déclarée au niveau ALTER
+            FOREIGN KEY (IdClient)
+            REFERENCES Client(IdClient);           -- FK simple	NOT NULL déclarée au niveau ALTER
 
 CREATE TABLE CommandeClient (
     IdCommande INT PRIMARY KEY, -- PK simple	 déclarée au niveau colonne

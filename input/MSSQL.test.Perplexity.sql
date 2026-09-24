@@ -35,6 +35,9 @@ CREATE TABLE categorie (
     nom_categorie    NVARCHAR(100) NOT NULL
 );
 
+ALTER TABLE categorie
+ADD CONSTRAINT pk_categorie PRIMARY KEY (id_categorie); -- PK simple	 déclarée au niveau ALTER
+
 CREATE TABLE produit (
     id_produit            INT NOT NULL PRIMARY KEY,  -- PK simple	 déclarée au niveau colonne
     code                  NVARCHAR(50) NOT NULL,
@@ -47,6 +50,13 @@ CREATE TABLE produit (
     id_categorie_secondaire INT NULL
     -- UNIQUE inline possible ici si besoin
 );
+
+ALTER TABLE produit
+ADD CONSTRAINT fk_produit_categorie_secondaire      -- FK simple	NULL     déclarée au niveau ALTER
+    FOREIGN KEY (id_categorie_secondaire)
+    REFERENCES categorie(id_categorie)
+    ON DELETE SET NULL
+    ON UPDATE CASCADE;
 
 CREATE TABLE version_produit (
     id_produit       INT NOT NULL,
@@ -83,8 +93,14 @@ CREATE TABLE produit_famille (
     code_famille     NVARCHAR(50) NULL,              -- pour FK composite nullable
     rang             INT NOT NULL,
     CONSTRAINT pk_produit_famille PRIMARY KEY (id_produit, rang) -- PK composite	 déclarée au niveau table
-    -- FK composite ajoutée via ALTER ci-dessous
 );
+
+ALTER TABLE produit_famille
+ADD CONSTRAINT fk_produit_famille_famille
+    FOREIGN KEY (id_famille, code_famille)
+    REFERENCES famille_produit(id_famille, code_famille) -- FK composite	NULL	 déclarée au niveau ALTER
+    ON DELETE SET NULL
+    ON UPDATE CASCADE;
 
 CREATE TABLE adresse_livraison (
     id_adresse       INT NOT NULL PRIMARY KEY,      -- PK simple	 déclarée au niveau colonne
@@ -108,6 +124,13 @@ CREATE TABLE commande (
     CONSTRAINT fk_commande_adresse_livraison
         FOREIGN KEY (id_adresse) REFERENCES adresse_livraison(id_adresse) -- FK simple	NULL     déclarée au niveau table
 );
+
+ALTER TABLE commande
+ADD CONSTRAINT fk_commande_client                -- FK simple	NOT NULL déclarée au niveau ALTER
+    FOREIGN KEY (id_client)
+    REFERENCES client(id_client)
+    ON DELETE NO ACTION
+    ON UPDATE NO ACTION;
 
 CREATE TABLE ligne_commande (
     id_commande      INT NOT NULL
@@ -155,28 +178,6 @@ CREATE TABLE stock_article (
         REFERENCES version_produit(id_produit, version_produit) -- FK composite NOT NULL déclarée au niveau table
 );
 
-ALTER TABLE produit
-ADD CONSTRAINT fk_produit_categorie_secondaire      -- FK simple	NULL     déclarée au niveau ALTER
-    FOREIGN KEY (id_categorie_secondaire)
-    REFERENCES categorie(id_categorie)
-    ON DELETE SET NULL
-    ON UPDATE CASCADE;
-
--- FK composite nullable via ALTER TABLE
-ALTER TABLE produit_famille
-ADD CONSTRAINT fk_produit_famille_famille
-    FOREIGN KEY (id_famille, code_famille)
-    REFERENCES famille_produit(id_famille, code_famille) -- FK composite	NULL	 déclarée au niveau ALTER
-    ON DELETE SET NULL
-    ON UPDATE CASCADE;
-
-ALTER TABLE commande
-ADD CONSTRAINT fk_commande_client                -- FK simple	NOT NULL déclarée au niveau ALTER
-    FOREIGN KEY (id_client)
-    REFERENCES client(id_client)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION;
-
 ALTER TABLE stock_article
 ADD CONSTRAINT pk_stock_article PRIMARY KEY (id_article, version_article); -- PK composite	 déclarée au niveau ALTER
 
@@ -184,6 +185,3 @@ ALTER TABLE stock_article
 ADD CONSTRAINT fk_stock_article_famille
     FOREIGN KEY (id_famille, code_famille)
     REFERENCES famille_produit(id_famille, code_famille); -- FK composite	NOT NULL déclarée au niveau ALTER
-
-ALTER TABLE categorie
-ADD CONSTRAINT pk_categorie PRIMARY KEY (id_categorie); -- PK simple	 déclarée au niveau ALTER

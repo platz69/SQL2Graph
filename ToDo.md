@@ -40,16 +40,22 @@ NOT NULL                    1..1 ------------------- ?..n
 UNIQUE                      0..1 ------------------- ?..1
 UNIQUE NOT NULL             1..1 ------------------- ?..1
 ------------------------
-faire à la main IA pas top :
+faire à la main :
 déplace les blocs "ALTER" juste après les "CREATE TABLE" correspondants. Ne prends aucune autre initiative
 -------------------------
 vérifier tous les commentaires oui/non et -- (Les MSSQL.test.*.sql sont déjà vérifiés)
-MSSQL.test.Perplexity.sql PAS parsé à partie de : -- 10) Table client_contact (n..n) (rate la table et ses FK)
+----------
+-------------
+MSSQL.test.Perplexity.sql pas toutes les tables !?
 ------------------------
 Débugguer toutes les détections d'unicité, y a plein de trous dans le parsing,exemple :
 il faut Client 0..1-------?..1 Profil  et pas ?..n
+
 MSSQL ne parse pas UNIQUE au niveau table (et peut-être pas non-plus au niveau ALTER) :
 CONSTRAINT UQ_ProfilClient_Client UNIQUE (IdClient) en MSSQL
 mais ceci oui :
 IdClient INT NOT NULL UNIQUE
 voir réponse IA dans /download/en.résumé.png
+
+faux amis dans le code, souvent "FK" est en fait une "relation"/"composant de FK" :
+ 1 FK = 1..n liaison(s) = 1 composante + 1 référence

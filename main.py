@@ -97,7 +97,6 @@ def conversion_ddl_en_objets(ddl_texte: str) -> Modele:
     """
     analyse via simple-ddl-parser puis conversion en objets Modele, Table, Colonne, Relation, CleEtrangere
     """
-    # analyse simple-ddl-parser
     # Possible output_modes: ['redshift', 'spark_sql', 'mysql', 'bigquery', 'mssql', 'databricks', 'sqlite', 'vertics', 'ibm_db2', 'postgres', 'oracle', 'hql', 'snowflake', 'sql']
     parsed = DDLParser(ddl_texte, normalize_names=True).run(group_by_type=False)  #, output_mode='mssql')  # output_mode='sql' est le mode par défaut, mais il ne gère pas les types SQL Server (ex: NVARCHAR))
 
@@ -111,56 +110,56 @@ def conversion_ddl_en_objets(ddl_texte: str) -> Modele:
             continue
 
         nom_table = raw_table["table_name"]
-        alter = raw_table.get("alter") if isinstance(raw_table.get("alter"), dict) else {}
+        alter     = raw_table.get("alter") # if isinstance(raw_table.get("alter"), dict) else {}
 
-        # les PK inline (colonne déclarée "PRIMARY KEY" dans le CREATE TABLE) sont dans primary_key,
-        # mais quand la PK est ajoutée via ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY (cas le plus
-        # courant en pg_dump), elle se trouve dans alter["primary_keys"] -> on fusionne les deux sources
-        pk_colonnes = set(raw_table.get("primary_key") or [])
-        # pour éviter un warning, on vérifie que alter est bien un dict (et pas None ou une autre structure)
-        if not isinstance(alter, dict):
-            raise ValueError(f"alter est None pour la table {nom_table}")  # sinon ça fait un warning
+        if not isinstance(alter, dict):  # on vérifie que alter est bien un dict et pas None sinon ça fait un warning
+            raise ValueError(f"alter est None pour la table {nom_table}")
+
+        # récupère les PK déclarées au niveau colonne ou table
+        pk = set(raw_table.get("primary_key") or [])
+
+        # on rajoute les PK déclarées au niveau ALTER
         for pk_decl in alter.get("primary_keys", []):
-            pk_colonnes.update(pk_decl.get("columns", []))
+            pk.update(pk_decl.get("columns", []))
 
-        # idem pour les contraintes UNIQUE : elles peuvent être déclarées inline (col["unique"])
-        # ou ajoutées via ALTER TABLE ... ADD CONSTRAINT ... UNIQUE (alter["uniques"])
-        unique_colonnes = {
-            raw_col["name"] for raw_col in raw_table["columns"] if raw_col.get("unique")
-        }
+        # récupère les UNIQUE déclarées au niveau colonne (columns/)
+        unique_colonnes = {raw_col["name"] for raw_col in raw_table["columns"] if raw_col.get("unique")}
+
+        # récupère les UNIQUE déclarées au niveau ALTER (alter/uniques/columns/ ? à tester)
         for unique_decl in alter.get("uniques", []):
             unique_colonnes.update(unique_decl.get("columns", []))
 
-        # idem pour les FK : quand elles sont ajoutées via ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY,
-        # simple-ddl-parser les restitue dans alter["columns"] (une entrée par colonne source avec "references")
-        fk_par_colonne = {
-            alter_col["name"]: alter_col["references"]
-            for alter_col in alter.get("columns", [])
-            if alter_col.get("references")
-        }
+        # récupère les {FK: ref} déclarées au niveau colonne ou table (columns/name: columns/references)
+        # attention, se trouve en double dans constraints/references !
+        fk_component_par_colonne = {col["name"]: col["references"]
+                          for col in raw_table.get("columns", []) if col.get("references")}
+        # rajoute les {FK: ref} déclarées au niveau ALTER (alter/columns/name et alter/columns/references)
+        for fk_component_decl in alter.get("columns", []):
+            if fk_component_decl.get("name") and fk_component_decl.get("references"):
+                fk_component_par_colonne[fk_component_decl["name"]] = fk_component_decl["references"]
 
         table = Table(nom=nom_table)
 
         # parcours des colonnes pour construire chaque objet Column et ses relations FK
         for raw_col in raw_table["columns"]:
             nom_colonne = raw_col["name"]
-            fk = None
-            # la référence peut être inline (raw_col["references"]) ou déclarée via ALTER (fk_par_colonne)
-            reference = raw_col.get("references") or fk_par_colonne.get(nom_colonne)
+            fk_component = None
+            # la référence peut être inline (raw_col["references"]) ou déclarée via ALTER (fk_component_par_colonne)
+            reference = raw_col.get("references") or fk_component_par_colonne.get(nom_colonne)
             # si la colonne référence une autre table, on construit la clé étrangère associée
             if reference:
                 # pour éviter un warning, on vérifie que la référence est bien un dict (et pas None ou une autre structure)
                 if not isinstance(reference, dict):
                     raise ValueError(f"Format de référence invalide pour la colonne {nom_colonne}")
                 # si la référence est fournie sous forme de liste, on prend le premier élément
-                fk = CleEtrangere(ref_table=reference["table"], ref_colonne=reference["column"][0]
+                fk_component = CleEtrangere(ref_table=reference["table"], ref_colonne=reference["column"][0]
                                  if isinstance(reference["column"], list) else reference["column"])
                 modele.relations.append(
                     Relation(
                         table_source=nom_table,
                         colonne_source=nom_colonne,
-                        table_destination=fk.ref_table,
-                        colonne_destination=fk.ref_colonne,
+                        table_destination=fk_component.ref_table,
+                        colonne_destination=fk_component.ref_colonne,
                     )
                 )
 
@@ -169,9 +168,9 @@ def conversion_ddl_en_objets(ddl_texte: str) -> Modele:
                     nom=nom_colonne,
                     type=conversion_type_colonne_en_str(raw_col),
                     nullable=raw_col.get("nullable", True),
-                    is_pk=nom_colonne in pk_colonnes,
+                    is_pk=nom_colonne in pk,
                     is_unique=nom_colonne in unique_colonnes,
-                    fk=fk,
+                    fk=fk_component,
                 )
             )
 
@@ -679,8 +678,8 @@ def main() -> None:
 
     # --- tables pour tester toutes syntaxes PK/FK et cardinalités ----
     # input_file = input_dir / "MSSQL.test.ChatGPT.sql"
-    input_file = input_dir / "MSSQL.test.Claude.sql"
-    # input_file = input_dir / "MSSQL.test.Perplexity.sql"
+    # input_file = input_dir / "MSSQL.test.Claude.sql"
+    input_file = input_dir / "MSSQL.test.Perplexity.sql"
     # input_file = input_dir / "MySQL.test.ChatGPT.sql"
     # input_file = input_dir / "MySQL.test.Claude.sql"
     # input_file = input_dir / "MySQL.test.Perplexity.sql"
@@ -716,10 +715,8 @@ def main() -> None:
         fk = [c.nom for c in t.colonnes if c.fk]
         print(f"  - {t.nom} : {len(t.colonnes)} colonnes, PK={pk}, FK={fk}")
     print(f"{len(model.relations)} relations détectées (attention : plusieurs relations pour 1 FK composite).")
-    if model.relations:
-        print("FK détectées :")
-        for rel in model.relations:
-            print(f"  - {rel.table_source}.{rel.colonne_source} -> {rel.table_destination}.{rel.colonne_destination}")
+    for rel in model.relations:
+        print(f"  - {rel.table_source}.{rel.colonne_source} -> {rel.table_destination}.{rel.colonne_destination}")
 
     # print("\nCardinalités détectées :")
     # afficher_cardinalites(model)
